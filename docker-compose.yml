@@ -1,0 +1,12 @@
+version: "3.4"
+
+services:
+
+  nginx:
+    container_name: nginx
+    image: nginx:latest
+    volumes:
+      - /tmp/nginx:/usr/share/nginx/html:ro
+    ports:
+      - 80:80
+
