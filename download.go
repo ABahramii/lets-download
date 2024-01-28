@@ -18,43 +18,13 @@ type Download struct {
 
 func (download Download) Do() error {
 	fmt.Println("making connection")
-	request, err := download.getNewRequest(http.MethodHead)
+	totalSize, err := download.getResourceSize()
 	if err != nil {
 		return err
 	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Got %v\n", response.StatusCode)
-
-	if response.StatusCode > 299 {
-		return errors.New(fmt.Sprintf("can't process, response code is %d", response.StatusCode))
-	}
-
-	totalSize, err := strconv.Atoi(response.Header.Get("Content-Length"))
-	if err != nil {
-		return err
-	}
-	fmt.Printf("size is %d bytes\n", totalSize)
 
 	sections := download.createSections(totalSize)
-
-	var wg sync.WaitGroup
-	wg.Add(len(sections))
-
-	for offset, section := range sections {
-		offset := offset
-		section := section
-		go func() {
-			err := download.downloadSection(offset, section)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-		}()
-	}
-	wg.Wait()
+	download.concurrentDownload(sections)
 
 	err = download.mergeFiles(sections)
 	if err != nil {
@@ -62,6 +32,37 @@ func (download Download) Do() error {
 	}
 
 	return nil
+}
+
+func (download Download) getResourceSize() (int, error) {
+	response, err := download.requestResourceSize()
+	if err != nil {
+		return 0, err
+	}
+	fmt.Printf("Got %v\n", response.StatusCode)
+
+	if response.StatusCode > 299 {
+		return 0, errors.New(fmt.Sprintf("can't process, response code is %d", response.StatusCode))
+	}
+
+	totalSize, err := strconv.Atoi(response.Header.Get("Content-Length"))
+	if err != nil {
+		return 0, err
+	}
+	fmt.Printf("size is %d bytes\n", totalSize)
+	return totalSize, nil
+}
+
+func (download Download) requestResourceSize() (*http.Response, error) {
+	request, err := download.getNewRequest(http.MethodHead)
+	if err != nil {
+		return nil, err
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (download Download) getNewRequest(method string) (*http.Request, error) {
@@ -73,7 +74,7 @@ func (download Download) getNewRequest(method string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("User-Agent", "let's download")
+	request.Header.Set("User-Agent", "let's-download")
 	return request, nil
 }
 
@@ -96,6 +97,24 @@ func (download Download) createSections(totalSize int) [][2]int {
 		start = end + 1
 	}
 	return sections
+}
+
+func (download Download) concurrentDownload(sections [][2]int) {
+	var wg sync.WaitGroup
+	wg.Add(len(sections))
+
+	for offset, section := range sections {
+		offset := offset
+		section := section
+		go func() {
+			err := download.downloadSection(offset, section)
+			if err != nil {
+				panic(err)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }
 
 func (download Download) downloadSection(offset int, section [2]int) error {
