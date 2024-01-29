@@ -13,6 +13,7 @@ import (
 type Download struct {
 	url           string
 	targetPath    string
+	resourceName  string
 	totalSections int
 }
 
@@ -27,6 +28,11 @@ func (download Download) Do() error {
 	download.concurrentDownload(sections)
 
 	err = download.mergeFiles(sections)
+	if err != nil {
+		return err
+	}
+
+	err = download.removeTempFiles(sections)
 	if err != nil {
 		return err
 	}
@@ -134,7 +140,7 @@ func (download Download) downloadSection(offset int, section [2]int) error {
 		return err
 	}
 
-	err = os.WriteFile(fmt.Sprintf("section-%d.tmp", offset), b, os.ModePerm)
+	err = os.WriteFile(fmt.Sprintf("%s/section-%d.tmp", download.targetPath, offset), b, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -143,13 +149,14 @@ func (download Download) downloadSection(offset int, section [2]int) error {
 }
 
 func (download Download) mergeFiles(sections [][2]int) error {
-	file, err := os.OpenFile(download.targetPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
+	filePath := fmt.Sprintf("%s/%s", download.targetPath, download.resourceName)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 	for i := range sections {
-		b, err := os.ReadFile(fmt.Sprintf("section-%d.tmp", i))
+		b, err := os.ReadFile(fmt.Sprintf("%s/section-%d.tmp", download.targetPath, i))
 		if err != nil {
 			return err
 		}
@@ -158,6 +165,16 @@ func (download Download) mergeFiles(sections [][2]int) error {
 			return err
 		}
 		fmt.Printf("%v bytes merged\n", n)
+	}
+	return nil
+}
+
+func (download Download) removeTempFiles(sections [][2]int) error {
+	for i := range sections {
+		err := os.Remove(fmt.Sprintf("%s/section-%d.tmp", download.targetPath, i))
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

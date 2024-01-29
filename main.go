@@ -14,7 +14,13 @@ func main() {
 		totalSections: 10,
 	}
 
-	err := download.Do()
+	resourceName, err := extractResourceName(download.url)
+	if err != nil {
+		fmt.Println("URL is invalid")
+	}
+	download.resourceName = resourceName
+
+	err = download.Do()
 	if err != nil {
 		fmt.Println("An error occurred while downloading.")
 		panic(err)
