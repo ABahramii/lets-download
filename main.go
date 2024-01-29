@@ -18,7 +18,7 @@ func main() {
 
 	resourceName, err := utils.ExtractResourceName(download.Url)
 	if err != nil {
-		fmt.Println("URL is invalid")
+		fmt.Println(err.Error())
 		os.Exit(0)
 	}
 	download.ResourceName = resourceName
@@ -32,6 +32,7 @@ func main() {
 	err = download.Do()
 	if err != nil {
 		fmt.Println("An error occurred while downloading.")
+		// Todo: remove panic
 		panic(err)
 	}
 

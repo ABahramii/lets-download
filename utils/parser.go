@@ -8,11 +8,11 @@ import (
 )
 
 func ExtractResourceName(urlStr string) (resourceName string, err error) {
-	url, err := url.Parse(urlStr)
+	parse, err := url.Parse(urlStr)
 	if err != nil {
-		return "", err
+		return "", errors.New("URL is invalid")
 	}
-	filename := path.Base(url.Path)
+	filename := path.Base(parse.Path)
 	return filename, nil
 }
 
