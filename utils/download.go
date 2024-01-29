@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"errors"
@@ -11,10 +11,10 @@ import (
 )
 
 type Download struct {
-	url           string
-	targetPath    string
-	resourceName  string
-	totalSections int
+	Url           string
+	TargetPath    string
+	ResourceName  string
+	TotalSections int
 }
 
 func (download Download) Do() error {
@@ -74,7 +74,7 @@ func (download Download) requestResourceSize() (*http.Response, error) {
 func (download Download) getNewRequest(method string) (*http.Request, error) {
 	request, err := http.NewRequest(
 		method,
-		download.url,
+		download.Url,
 		nil,
 	)
 	if err != nil {
@@ -85,7 +85,7 @@ func (download Download) getNewRequest(method string) (*http.Request, error) {
 }
 
 func (download Download) createSections(totalSize int) [][2]int {
-	sections := make([][2]int, download.totalSections)
+	sections := make([][2]int, download.TotalSections)
 
 	sectionSize := totalSize / 10
 	remain := totalSize % 10
@@ -140,7 +140,7 @@ func (download Download) downloadSection(offset int, section [2]int) error {
 		return err
 	}
 
-	err = os.WriteFile(fmt.Sprintf("%s/section-%d.tmp", download.targetPath, offset), b, os.ModePerm)
+	err = os.WriteFile(fmt.Sprintf("%s/section-%d.tmp", download.TargetPath, offset), b, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -149,14 +149,14 @@ func (download Download) downloadSection(offset int, section [2]int) error {
 }
 
 func (download Download) mergeFiles(sections [][2]int) error {
-	filePath := fmt.Sprintf("%s/%s", download.targetPath, download.resourceName)
+	filePath := fmt.Sprintf("%s/%s", download.TargetPath, download.ResourceName)
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 	for i := range sections {
-		b, err := os.ReadFile(fmt.Sprintf("%s/section-%d.tmp", download.targetPath, i))
+		b, err := os.ReadFile(fmt.Sprintf("%s/section-%d.tmp", download.TargetPath, i))
 		if err != nil {
 			return err
 		}
@@ -171,7 +171,7 @@ func (download Download) mergeFiles(sections [][2]int) error {
 
 func (download Download) removeTempFiles(sections [][2]int) error {
 	for i := range sections {
-		err := os.Remove(fmt.Sprintf("%s/section-%d.tmp", download.targetPath, i))
+		err := os.Remove(fmt.Sprintf("%s/section-%d.tmp", download.TargetPath, i))
 		if err != nil {
 			return err
 		}
