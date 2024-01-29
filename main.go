@@ -1,18 +1,25 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"let_s_download/utils"
 	"os"
 	"time"
 )
 
+var (
+	url        = flag.String("url", "http://127.0.0.1:80/test-file", "URL for download file")
+	targetPath = flag.String("output", "./", "path for downloaded file")
+)
+
 func main() {
 	start := time.Now()
+	flag.Parse()
 
 	download := utils.Download{
-		Url:           "http://127.0.0.1:80/test-movie.mkv",
-		TargetPath:    "./",
+		Url:           *url,
+		TargetPath:    *targetPath,
 		TotalSections: 10,
 	}
 
