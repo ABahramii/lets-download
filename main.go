@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	url        = flag.String("url", "http://127.0.0.1:80/test-file", "URL for download file")
-	targetPath = flag.String("output", "./", "path for downloaded file")
+	currentDir, _ = os.Getwd()
+	url           = flag.String("url", "http://127.0.0.1:80/test_file", "URL for download file")
+	targetPath    = flag.String("targetPath", currentDir, "path for downloaded file")
 )
 
 func main() {
