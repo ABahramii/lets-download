@@ -11,7 +11,7 @@ import (
 )
 
 type Download struct {
-	Url           string
+	URL           string
 	TargetPath    string
 	ResourceName  string
 	TotalSections int
@@ -24,10 +24,10 @@ func (download Download) Do() error {
 		return err
 	}
 
-	sections := download.createSections(totalSize)
+	sections := makeSections(download.TotalSections, totalSize)
 	download.concurrentDownload(sections)
 
-	err = download.mergeFiles(sections)
+	err = mergeFiles(download.TargetPath, download.ResourceName, sections)
 	if err != nil {
 		return err
 	}
@@ -40,23 +40,24 @@ func (download Download) Do() error {
 	return nil
 }
 
-func (download Download) getResourceSize() (int, error) {
+func (download *Download) getResourceSize() (int, error) {
 	response, err := download.requestResourceSize()
 	if err != nil {
 		return 0, err
 	}
+	defer response.Body.Close()
 	fmt.Printf("Got %v\n", response.StatusCode)
 
 	if response.StatusCode > 299 {
 		return 0, errors.New(fmt.Sprintf("can't process, response code is %d", response.StatusCode))
 	}
 
-	totalSize, err := strconv.Atoi(response.Header.Get("Content-Length"))
+	totalSize := response.Header.Get("Content-Length")
 	if err != nil {
 		return 0, err
 	}
 	fmt.Printf("size is %d bytes\n", totalSize)
-	return totalSize, nil
+	return strconv.Atoi(totalSize)
 }
 
 func (download Download) requestResourceSize() (*http.Response, error) {
@@ -74,7 +75,7 @@ func (download Download) requestResourceSize() (*http.Response, error) {
 func (download Download) getNewRequest(method string) (*http.Request, error) {
 	request, err := http.NewRequest(
 		method,
-		download.Url,
+		download.URL,
 		nil,
 	)
 	if err != nil {
@@ -84,8 +85,8 @@ func (download Download) getNewRequest(method string) (*http.Request, error) {
 	return request, nil
 }
 
-func (download Download) createSections(totalSize int) [][2]int {
-	sections := make([][2]int, download.TotalSections)
+func makeSections(totalSections, totalSize int) [][2]int {
+	sections := make([][2]int, totalSections)
 
 	sectionSize := totalSize / 10
 	remain := totalSize % 10
@@ -148,15 +149,15 @@ func (download Download) downloadSection(offset int, section [2]int) error {
 	return nil
 }
 
-func (download Download) mergeFiles(sections [][2]int) error {
-	filePath := fmt.Sprintf("%s/%s", download.TargetPath, download.ResourceName)
+func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
+	filePath := fmt.Sprintf("%s/%s", targetPath, resourceName)
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 	for i := range sections {
-		b, err := os.ReadFile(fmt.Sprintf("%s/section-%d.tmp", download.TargetPath, i))
+		b, err := os.ReadFile(fmt.Sprintf("%s/section-%d.tmp", targetPath, i))
 		if err != nil {
 			return err
 		}

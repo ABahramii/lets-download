@@ -19,12 +19,12 @@ func main() {
 	flag.Parse()
 
 	download := utils.Download{
-		Url:           *url,
+		URL:           *url,
 		TargetPath:    *targetPath,
 		TotalSections: 10,
 	}
 
-	resourceName, err := utils.ExtractResourceName(download.Url)
+	resourceName, err := utils.ExtractResourceName(download.URL)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(0)
