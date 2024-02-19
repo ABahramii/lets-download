@@ -25,7 +25,10 @@ func (download *Download) Do() error {
 	}
 
 	sections := makeSections(download.TotalSections, totalSize)
-	download.concurrentDownload(sections)
+	err = download.concurrentDownload(sections)
+	if err != nil {
+		return err
+	}
 
 	err = mergeFiles(download.TargetPath, download.ResourceName, sections)
 	if err != nil {
@@ -85,22 +88,31 @@ func (download *Download) getNewRequest(method string) (*http.Request, error) {
 	return request, nil
 }
 
-func (download *Download) concurrentDownload(sections [][2]int) {
+func (download *Download) concurrentDownload(sections [][2]int) error {
 	var wg sync.WaitGroup
 	wg.Add(len(sections))
+	errorsCh := make(chan error, len(sections))
 
-	for offset, section := range sections {
-		offset := offset
-		section := section
-		go func() {
-			err := download.downloadSection(offset, section)
-			if err != nil {
-				panic(err)
+	for i, section := range sections {
+		go func(i int, section [2]int) {
+			defer wg.Done()
+			if err := download.downloadSection(i, section); err != nil {
+				errorsCh <- fmt.Errorf("failed to download section %download: %w", i, err)
+				return
 			}
-			wg.Done()
-		}()
+		}(i, section)
 	}
+
 	wg.Wait()
+	close(errorsCh)
+
+	for err := range errorsCh {
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (download *Download) downloadSection(offset int, section [2]int) error {
