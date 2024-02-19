@@ -17,7 +17,7 @@ type Download struct {
 	TotalSections int
 }
 
-func (download Download) Do() error {
+func (download *Download) Do() error {
 	fmt.Println("making connection")
 	totalSize, err := download.getResourceSize()
 	if err != nil {
@@ -60,7 +60,7 @@ func (download *Download) getResourceSize() (int, error) {
 	return strconv.Atoi(totalSize)
 }
 
-func (download Download) requestResourceSize() (*http.Response, error) {
+func (download *Download) requestResourceSize() (*http.Response, error) {
 	request, err := download.getNewRequest(http.MethodHead)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (download Download) requestResourceSize() (*http.Response, error) {
 	return response, nil
 }
 
-func (download Download) getNewRequest(method string) (*http.Request, error) {
+func (download *Download) getNewRequest(method string) (*http.Request, error) {
 	request, err := http.NewRequest(
 		method,
 		download.URL,
@@ -85,28 +85,7 @@ func (download Download) getNewRequest(method string) (*http.Request, error) {
 	return request, nil
 }
 
-func makeSections(totalSections, totalSize int) [][2]int {
-	sections := make([][2]int, totalSections)
-
-	sectionSize := totalSize / 10
-	remain := totalSize % 10
-	start := 0
-	var end int
-
-	for i := 0; i < 10; i++ {
-		if i == 9 {
-			end = start + sectionSize + remain
-		} else {
-			end = start + sectionSize - 1
-		}
-		sections[i][0] = start
-		sections[i][1] = end
-		start = end + 1
-	}
-	return sections
-}
-
-func (download Download) concurrentDownload(sections [][2]int) {
+func (download *Download) concurrentDownload(sections [][2]int) {
 	var wg sync.WaitGroup
 	wg.Add(len(sections))
 
@@ -124,7 +103,7 @@ func (download Download) concurrentDownload(sections [][2]int) {
 	wg.Wait()
 }
 
-func (download Download) downloadSection(offset int, section [2]int) error {
+func (download *Download) downloadSection(offset int, section [2]int) error {
 	request, err := download.getNewRequest(http.MethodGet)
 	if err != nil {
 		return err
@@ -149,6 +128,37 @@ func (download Download) downloadSection(offset int, section [2]int) error {
 	return nil
 }
 
+func (download *Download) removeTempFiles(sections [][2]int) error {
+	for i := range sections {
+		err := os.Remove(fmt.Sprintf("%s/section-%d.tmp", download.TargetPath, i))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func makeSections(totalSections, totalSize int) [][2]int {
+	sections := make([][2]int, totalSections)
+
+	sectionSize := totalSize / 10
+	remain := totalSize % 10
+	start := 0
+	var end int
+
+	for i := 0; i < 10; i++ {
+		if i == 9 {
+			end = start + sectionSize + remain
+		} else {
+			end = start + sectionSize - 1
+		}
+		sections[i][0] = start
+		sections[i][1] = end
+		start = end + 1
+	}
+	return sections
+}
+
 func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
 	filePath := fmt.Sprintf("%s/%s", targetPath, resourceName)
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
@@ -166,16 +176,6 @@ func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
 			return err
 		}
 		fmt.Printf("%v bytes merged\n", n)
-	}
-	return nil
-}
-
-func (download Download) removeTempFiles(sections [][2]int) error {
-	for i := range sections {
-		err := os.Remove(fmt.Sprintf("%s/section-%d.tmp", download.TargetPath, i))
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
