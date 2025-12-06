@@ -49,17 +49,14 @@ func (download *Download) getResourceSize() (int, error) {
 		return 0, err
 	}
 	defer response.Body.Close()
-	fmt.Printf("Got %v\n", response.StatusCode)
+	fmt.Printf("status: %v\n", response.StatusCode)
 
 	if response.StatusCode > 299 {
 		return 0, errors.New(fmt.Sprintf("can't process, response code is %d", response.StatusCode))
 	}
 
 	totalSize := response.Header.Get("Content-Length")
-	if err != nil {
-		return 0, err
-	}
-	fmt.Printf("size is %d bytes\n", totalSize)
+	fmt.Printf("file: %s\nsize: %s bytes\n", download.ResourceName, totalSize)
 	return strconv.Atoi(totalSize)
 }
 
@@ -172,7 +169,7 @@ func makeSections(totalSections, totalSize int) [][2]int {
 }
 
 func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
-	filePath := fmt.Sprintf("%s/%s", targetPath, resourceName)
+	filePath := fmt.Sprintf("%s/%s", targetPath, resourceName+".mp4")
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return err
@@ -183,11 +180,11 @@ func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
 		if err != nil {
 			return err
 		}
-		n, err := file.Write(b)
+		_, err = file.Write(b)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%v bytes merged\n", n)
+		//fmt.Printf("%v bytes merged\n", n)
 	}
 	return nil
 }
