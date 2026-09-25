@@ -159,7 +159,7 @@ func (download *Download) getNewRequest(method string) (*http.Request, error) {
 func (download *Download) concurrentDownload(sections []byteRange) error {
 	errs := runParallel(len(sections), 0, func(i int) error {
 		if err := download.downloadSection(i, sections[i]); err != nil {
-			return fmt.Errorf("failed to download section %download: %w", i, err)
+			return fmt.Errorf("failed to download section %d: %w", i, err)
 		}
 		return nil
 	})

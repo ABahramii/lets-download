@@ -226,6 +226,28 @@ func TestDownload_NonPartialResponse(t *testing.T) {
 	assertNoTempFiles(t, targetPath)
 }
 
+func TestDownload_SectionErrorMessage(t *testing.T) {
+	content := randomBytes(t, 1_000)
+	// fails only section 3 (bytes 300-399 of 10 sections)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") == "bytes=300-399" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		http.ServeContent(w, r, "file", time.Time{}, bytes.NewReader(content))
+	}))
+	t.Cleanup(server.Close)
+	targetPath := t.TempDir()
+
+	err := newTestDownload(server.URL+"/file", targetPath, "file").Do()
+
+	want := "failed to download section 3: unexpected response code 503 for range request"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got error %v, want %q", err, want)
+	}
+	assertNoTempFiles(t, targetPath)
+}
+
 func TestNewDownload(t *testing.T) {
 	d, err := NewDownload("https://a.com/dir/file.zip", "/tmp")
 	if err != nil {
