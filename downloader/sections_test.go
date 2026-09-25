@@ -109,3 +109,22 @@ func TestMakeSections_CoversEveryByte(t *testing.T) {
 		}
 	}
 }
+
+func TestParseContentRange(t *testing.T) {
+	valid := map[string]byteRange{
+		"bytes 0-99/1000": {0, 99},
+		"bytes 5-9/*":     {5, 9},
+	}
+	for value, want := range valid {
+		got, err := parseContentRange(value)
+		if err != nil || got != want {
+			t.Fatalf("%q: got %v, %v; want %v", value, got, err, want)
+		}
+	}
+
+	for _, value := range []string{"", "items 0-9/10", "bytes 0-9", "bytes a-9/10", "bytes 0-/10", "bytes */10"} {
+		if _, err := parseContentRange(value); err == nil {
+			t.Fatalf("%q: expected error", value)
+		}
+	}
+}

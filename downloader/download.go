@@ -191,6 +191,16 @@ func (download *Download) downloadSection(index int, section byteRange) error {
 	if response.StatusCode != http.StatusPartialContent {
 		return fmt.Errorf("unexpected response code %d for range request", response.StatusCode)
 	}
+	// a 206 for a different range (e.g. a server that caps chunk sizes) must not be merged either
+	if value := response.Header.Get("Content-Range"); value != "" {
+		got, err := parseContentRange(value)
+		if err != nil {
+			return err
+		}
+		if got != section {
+			return fmt.Errorf("server sent bytes %d-%d, requested %d-%d", got.start, got.end, section.start, section.end)
+		}
+	}
 
 	file, err := os.Create(sectionFilePath(download.TargetPath, download.ResourceName, index))
 	if err != nil {
@@ -198,9 +208,15 @@ func (download *Download) downloadSection(index int, section byteRange) error {
 	}
 	defer file.Close()
 
-	n, err := io.Copy(file, watchdog.reader(response.Body))
+	// read at most one byte more than expected, enough to detect a body that is too long
+	n, err := io.Copy(file, io.LimitReader(watchdog.reader(response.Body), int64(section.length())+1))
 	if err != nil {
 		return watchdog.err(err)
+	}
+	if want := int64(section.length()); n > want {
+		return fmt.Errorf("received more than %d bytes for range %d-%d", want, section.start, section.end)
+	} else if n < want {
+		return fmt.Errorf("received %d bytes for range %d-%d, want %d", n, section.start, section.end, want)
 	}
 	fmt.Fprintf(download.out(), "downloaded %d bytes from section %d: [%d %d]\n", n, index, section.start, section.end)
 

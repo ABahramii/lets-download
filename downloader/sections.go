@@ -1,5 +1,11 @@
 package downloader
 
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
 // defaultSectionCount is how many byte ranges a file is split into when
 // Download.TotalSections is not set.
 const defaultSectionCount = 10
@@ -8,6 +14,37 @@ const defaultSectionCount = 10
 type byteRange struct {
 	start int
 	end   int
+}
+
+func (r byteRange) length() int {
+	return r.end - r.start + 1
+}
+
+// parseContentRange parses a Content-Range header value such as
+// "bytes 0-99/1000" (the total may be "*").
+func parseContentRange(value string) (byteRange, error) {
+	invalid := fmt.Errorf("invalid Content-Range %q", value)
+	rest, ok := strings.CutPrefix(value, "bytes ")
+	if !ok {
+		return byteRange{}, invalid
+	}
+	rest, _, ok = strings.Cut(rest, "/")
+	if !ok {
+		return byteRange{}, invalid
+	}
+	startStr, endStr, ok := strings.Cut(rest, "-")
+	if !ok {
+		return byteRange{}, invalid
+	}
+	start, err := strconv.Atoi(startStr)
+	if err != nil {
+		return byteRange{}, invalid
+	}
+	end, err := strconv.Atoi(endStr)
+	if err != nil {
+		return byteRange{}, invalid
+	}
+	return byteRange{start: start, end: end}, nil
 }
 
 // makeSections splits totalSize bytes into inclusive ranges that together cover

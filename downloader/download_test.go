@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -386,6 +387,93 @@ func TestDownload_UsesTotalSections(t *testing.T) {
 			}
 			assertDownloaded(t, targetPath, "file", content)
 			assertNoTempFiles(t, targetPath)
+		})
+	}
+}
+
+// newRangeServer answers HEAD with size and hands every range request to respond,
+// which writes the whole response.
+func newRangeServer(t *testing.T, size int, respond func(w http.ResponseWriter, section byteRange)) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Length", strconv.Itoa(size))
+			return
+		}
+		var section byteRange
+		if _, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &section.start, &section.end); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		respond(w, section)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestDownload_WrongSectionResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		respond func(w http.ResponseWriter, section byteRange)
+		wantErr string
+	}{
+		{
+			// a server that caps chunks at 50 bytes and says so in Content-Range
+			name: "different Content-Range",
+			respond: func(w http.ResponseWriter, section byteRange) {
+				end := min(section.end, section.start+49)
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/100", section.start, end))
+				w.Header().Set("Content-Length", strconv.Itoa(end-section.start+1))
+				w.WriteHeader(http.StatusPartialContent)
+				w.Write(make([]byte, end-section.start+1))
+			},
+			wantErr: "server sent bytes 0-49, requested 0-99",
+		},
+		{
+			name: "invalid Content-Range",
+			respond: func(w http.ResponseWriter, section byteRange) {
+				w.Header().Set("Content-Range", "bytes garbage")
+				w.WriteHeader(http.StatusPartialContent)
+			},
+			wantErr: `invalid Content-Range "bytes garbage"`,
+		},
+		{
+			// no Content-Range and no Content-Length, so only the byte count can catch it
+			name: "short body",
+			respond: func(w http.ResponseWriter, section byteRange) {
+				w.WriteHeader(http.StatusPartialContent)
+				w.Write(make([]byte, section.length()/2))
+			},
+			wantErr: "received 50 bytes for range 0-99, want 100",
+		},
+		{
+			name: "long body",
+			respond: func(w http.ResponseWriter, section byteRange) {
+				w.WriteHeader(http.StatusPartialContent)
+				w.Write(make([]byte, section.length()+10))
+			},
+			wantErr: "received more than 100 bytes for range 0-99",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// one 100-byte section, so the failing section and its range are known
+			server := newRangeServer(t, 100, tt.respond)
+			targetPath := t.TempDir()
+
+			d := newTestDownload(server.URL+"/file", targetPath, "file")
+			d.TotalSections = 1
+			err := d.Do()
+
+			want := "failed to download section 0: " + tt.wantErr
+			if err == nil || err.Error() != want {
+				t.Fatalf("got error %v, want %q", err, want)
+			}
+			assertNoTempFiles(t, targetPath)
+			if _, statErr := os.Stat(filepath.Join(targetPath, "file.mp4")); !os.IsNotExist(statErr) {
+				t.Fatalf("output file must not be created, stat error: %v", statErr)
+			}
 		})
 	}
 }
