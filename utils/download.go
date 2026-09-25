@@ -4,11 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 )
+
+// httpClient has no overall timeout so large downloads aren't cut off,
+// but a server that stops responding won't hang the download forever.
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+	},
+}
 
 type Download struct {
 	URL           string
@@ -17,7 +31,7 @@ type Download struct {
 	TotalSections int
 }
 
-func (download *Download) Do() error {
+func (download *Download) Do() (err error) {
 	fmt.Println("making connection")
 	totalSize, err := download.getResourceSize()
 	if err != nil {
@@ -25,34 +39,38 @@ func (download *Download) Do() error {
 	}
 
 	sections := makeSections(download.TotalSections, totalSize)
+	// remove temp files even when a section or the merge fails
+	defer func() {
+		if removeErr := download.removeTempFiles(sections); err == nil {
+			err = removeErr
+		}
+	}()
+
 	err = download.concurrentDownload(sections)
 	if err != nil {
 		return err
 	}
 
-	err = mergeFiles(download.TargetPath, download.ResourceName, sections)
-	if err != nil {
-		return err
-	}
-
-	err = download.removeTempFiles(sections)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return mergeFiles(download.TargetPath, download.ResourceName, sections)
 }
 
-// DownloadAll downloads all given resources concurrently.
+// DownloadAll downloads all given resources concurrently, at most maxParallel
+// at a time (maxParallel <= 0 means no limit).
 // A failed download does not stop the others; all failures are returned joined.
-func DownloadAll(downloads []*Download) error {
+func DownloadAll(downloads []*Download, maxParallel int) error {
+	if maxParallel <= 0 {
+		maxParallel = len(downloads)
+	}
 	var wg sync.WaitGroup
 	wg.Add(len(downloads))
 	errorsCh := make(chan error, len(downloads))
+	semaphore := make(chan struct{}, maxParallel)
 
 	for _, download := range downloads {
 		go func(download *Download) {
 			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 			if err := download.Do(); err != nil {
 				errorsCh <- fmt.Errorf("%s: %w", download.URL, err)
 			}
@@ -91,7 +109,7 @@ func (download *Download) requestResourceSize() (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -144,30 +162,36 @@ func (download *Download) downloadSection(offset int, section [2]int) error {
 		return err
 	}
 	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", section[0], section[1]))
-	response, err := http.DefaultClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
 
-	b, err := io.ReadAll(response.Body)
-	fmt.Printf("downloaded %v bytes from section %d: %d\n", response.Header.Get("Content-Length"), offset, section)
+	// anything other than 206 (e.g. 429, 503 or a full-body 200) must not be merged into the file
+	if response.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("unexpected response code %d for range request", response.StatusCode)
+	}
+
+	file, err := os.Create(sectionFilePath(download.TargetPath, download.ResourceName, offset))
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
-	err = os.WriteFile(sectionFilePath(download.TargetPath, download.ResourceName, offset), b, os.ModePerm)
+	n, err := io.Copy(file, response.Body)
 	if err != nil {
 		return err
 	}
+	fmt.Printf("downloaded %d bytes from section %d: %d\n", n, offset, section)
 
-	return nil
+	return file.Close()
 }
 
 func (download *Download) removeTempFiles(sections [][2]int) error {
 	for i := range sections {
 		err := os.Remove(sectionFilePath(download.TargetPath, download.ResourceName, i))
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}

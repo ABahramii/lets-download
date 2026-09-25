@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -43,5 +44,32 @@ func TestReadLinks_NoLinks(t *testing.T) {
 	_, err := ReadLinks(path)
 	if err == nil {
 		t.Fatal("expected error for file without links")
+	}
+}
+
+func TestReadLinks_CRLFAndNoTrailingNewline(t *testing.T) {
+	path := writeLinksFile(t, "http://a.com/file1\r\nhttp://b.com/file2")
+
+	links, err := ReadLinks(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := []string{"http://a.com/file1", "http://b.com/file2"}
+	if !reflect.DeepEqual(links, want) {
+		t.Fatalf("got %v, want %v", links, want)
+	}
+}
+
+func TestReadLinks_LongLine(t *testing.T) {
+	longLink := "http://a.com/file?sig=" + strings.Repeat("x", 100_000)
+	path := writeLinksFile(t, longLink+"\n")
+
+	links, err := ReadLinks(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(links) != 1 || links[0] != longLink {
+		t.Fatalf("long link not read correctly")
 	}
 }

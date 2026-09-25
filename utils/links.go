@@ -19,6 +19,8 @@ func ReadLinks(filePath string) ([]string, error) {
 
 	var links []string
 	scanner := bufio.NewScanner(file)
+	// signed URLs can be longer than the default 64KB line limit
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
