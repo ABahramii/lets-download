@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func writeSections(t *testing.T, targetPath, resourceName string, contents []string) [][2]int {
+func writeSections(t *testing.T, targetPath, resourceName string, contents []string) []byteRange {
 	t.Helper()
-	sections := make([][2]int, len(contents))
+	sections := make([]byteRange, len(contents))
 	for i, content := range contents {
 		if err := os.WriteFile(sectionFilePath(targetPath, resourceName, i), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -57,7 +57,7 @@ func TestMergeFiles_AppendsToExistingFile(t *testing.T) {
 
 func TestMergeFiles_MissingSection(t *testing.T) {
 	dir := t.TempDir()
-	if err := mergeFiles(dir, "video", make([][2]int, 1)); err == nil {
+	if err := mergeFiles(dir, "video", make([]byteRange, 1)); err == nil {
 		t.Fatal("expected error for missing section file")
 	}
 }
@@ -65,7 +65,7 @@ func TestMergeFiles_MissingSection(t *testing.T) {
 func TestRemoveTempFiles_IgnoresMissing(t *testing.T) {
 	dir := t.TempDir()
 	sections := writeSections(t, dir, "video", []string{"a"})
-	sections = append(sections, [2]int{}) // section 1 was never written
+	sections = append(sections, byteRange{}) // section 1 was never written
 
 	d := &Download{TargetPath: dir, ResourceName: "video"}
 	if err := d.removeTempFiles(sections); err != nil {

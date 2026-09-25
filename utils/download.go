@@ -25,6 +25,15 @@ var httpClient = &http.Client{
 	},
 }
 
+// sectionCount is how many byte ranges a file is split into.
+const sectionCount = 10
+
+// byteRange is an inclusive range of bytes, as used in an HTTP Range header.
+type byteRange struct {
+	start int
+	end   int
+}
+
 type Download struct {
 	URL           string
 	TargetPath    string
@@ -122,13 +131,13 @@ func (download *Download) getNewRequest(method string) (*http.Request, error) {
 	return request, nil
 }
 
-func (download *Download) concurrentDownload(sections [][2]int) error {
+func (download *Download) concurrentDownload(sections []byteRange) error {
 	var wg sync.WaitGroup
 	wg.Add(len(sections))
 	errorsCh := make(chan error, len(sections))
 
 	for i, section := range sections {
-		go func(i int, section [2]int) {
+		go func(i int, section byteRange) {
 			defer wg.Done()
 			if err := download.downloadSection(i, section); err != nil {
 				errorsCh <- fmt.Errorf("failed to download section %download: %w", i, err)
@@ -149,12 +158,12 @@ func (download *Download) concurrentDownload(sections [][2]int) error {
 	return nil
 }
 
-func (download *Download) downloadSection(index int, section [2]int) error {
+func (download *Download) downloadSection(index int, section byteRange) error {
 	request, err := download.getNewRequest(http.MethodGet)
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", section[0], section[1]))
+	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", section.start, section.end))
 	response, err := httpClient.Do(request)
 	if err != nil {
 		return err
@@ -176,12 +185,12 @@ func (download *Download) downloadSection(index int, section [2]int) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("downloaded %d bytes from section %d: %d\n", n, index, section)
+	fmt.Printf("downloaded %d bytes from section %d: [%d %d]\n", n, index, section.start, section.end)
 
 	return file.Close()
 }
 
-func (download *Download) removeTempFiles(sections [][2]int) error {
+func (download *Download) removeTempFiles(sections []byteRange) error {
 	for i := range sections {
 		err := os.Remove(sectionFilePath(download.TargetPath, download.ResourceName, i))
 		if err != nil && !os.IsNotExist(err) {
@@ -197,28 +206,27 @@ func sectionFilePath(targetPath, resourceName string, i int) string {
 	return filepath.Join(targetPath, fmt.Sprintf("%s.section-%d.tmp", resourceName, i))
 }
 
-func makeSections(totalSections, totalSize int) [][2]int {
-	sections := make([][2]int, totalSections)
+func makeSections(totalSections, totalSize int) []byteRange {
+	sections := make([]byteRange, totalSections)
 
-	sectionSize := totalSize / 10
-	remain := totalSize % 10
+	sectionSize := totalSize / sectionCount
+	remain := totalSize % sectionCount
 	start := 0
 	var end int
 
-	for i := 0; i < 10; i++ {
-		if i == 9 {
+	for i := 0; i < sectionCount; i++ {
+		if i == sectionCount-1 {
 			end = start + sectionSize + remain
 		} else {
 			end = start + sectionSize - 1
 		}
-		sections[i][0] = start
-		sections[i][1] = end
+		sections[i] = byteRange{start: start, end: end}
 		start = end + 1
 	}
 	return sections
 }
 
-func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
+func mergeFiles(targetPath, resourceName string, sections []byteRange) error {
 	filePath := filepath.Join(targetPath, resourceName+".mp4")
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {

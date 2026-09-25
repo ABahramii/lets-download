@@ -9,12 +9,12 @@ func TestMakeSections(t *testing.T) {
 	tests := []struct {
 		name      string
 		totalSize int
-		want      [][2]int
+		want      []byteRange
 	}{
 		{
 			name:      "evenly divisible",
 			totalSize: 1000,
-			want: [][2]int{
+			want: []byteRange{
 				{0, 99}, {100, 199}, {200, 299}, {300, 399}, {400, 499},
 				{500, 599}, {600, 699}, {700, 799}, {800, 899}, {900, 1000},
 			},
@@ -24,7 +24,7 @@ func TestMakeSections(t *testing.T) {
 			// last byte), which works only because servers clamp the range
 			name:      "with remainder",
 			totalSize: 1005,
-			want: [][2]int{
+			want: []byteRange{
 				{0, 99}, {100, 199}, {200, 299}, {300, 399}, {400, 499},
 				{500, 599}, {600, 699}, {700, 799}, {800, 899}, {900, 1005},
 			},
@@ -33,7 +33,7 @@ func TestMakeSections(t *testing.T) {
 			// current behavior for files smaller than 10 bytes: invalid ranges
 			name:      "smaller than section count",
 			totalSize: 5,
-			want: [][2]int{
+			want: []byteRange{
 				{0, -1}, {0, -1}, {0, -1}, {0, -1}, {0, -1},
 				{0, -1}, {0, -1}, {0, -1}, {0, -1}, {0, 5},
 			},
