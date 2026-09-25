@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -22,15 +21,6 @@ var httpClient = &http.Client{
 		ResponseHeaderTimeout: 30 * time.Second,
 		IdleConnTimeout:       90 * time.Second,
 	},
-}
-
-// sectionCount is how many byte ranges a file is split into.
-const sectionCount = 10
-
-// byteRange is an inclusive range of bytes, as used in an HTTP Range header.
-type byteRange struct {
-	start int
-	end   int
 }
 
 type Download struct {
@@ -153,67 +143,4 @@ func (download *Download) downloadSection(index int, section byteRange) error {
 	fmt.Printf("downloaded %d bytes from section %d: [%d %d]\n", n, index, section.start, section.end)
 
 	return file.Close()
-}
-
-func (download *Download) removeTempFiles(sections []byteRange) error {
-	for i := range sections {
-		err := os.Remove(sectionFilePath(download.TargetPath, download.ResourceName, i))
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
-}
-
-// sectionFilePath includes the resource name so concurrent downloads
-// into the same directory don't overwrite each other's temp files.
-func sectionFilePath(targetPath, resourceName string, i int) string {
-	return filepath.Join(targetPath, fmt.Sprintf("%s.section-%d.tmp", resourceName, i))
-}
-
-func makeSections(totalSections, totalSize int) []byteRange {
-	sections := make([]byteRange, totalSections)
-
-	sectionSize := totalSize / sectionCount
-	remain := totalSize % sectionCount
-	start := 0
-	var end int
-
-	for i := 0; i < sectionCount; i++ {
-		if i == sectionCount-1 {
-			end = start + sectionSize + remain
-		} else {
-			end = start + sectionSize - 1
-		}
-		sections[i] = byteRange{start: start, end: end}
-		start = end + 1
-	}
-	return sections
-}
-
-func mergeFiles(targetPath, resourceName string, sections []byteRange) error {
-	filePath := filepath.Join(targetPath, resourceName+".mp4")
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	for i := range sections {
-		if err := appendFile(file, sectionFilePath(targetPath, resourceName, i)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// appendFile streams the file at path into dst without loading it into memory.
-func appendFile(dst io.Writer, path string) error {
-	src, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	_, err = io.Copy(dst, src)
-	return err
 }

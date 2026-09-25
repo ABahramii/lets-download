@@ -73,3 +73,21 @@ func TestRemoveTempFiles_IgnoresMissing(t *testing.T) {
 	}
 	assertNoTempFiles(t, dir)
 }
+
+func TestValidateTargetPath(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ValidateTargetPath(dir); err != nil {
+		t.Fatalf("directory: unexpected error: %v", err)
+	}
+	if err := ValidateTargetPath(filepath.Join(dir, "missing")); err == nil || err.Error() != "target path does not exits" {
+		t.Fatalf("missing path: got %v", err)
+	}
+	if err := ValidateTargetPath(file); err == nil || err.Error() != "target path is not a directory" {
+		t.Fatalf("file: got %v", err)
+	}
+}
