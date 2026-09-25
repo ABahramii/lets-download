@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -28,6 +29,25 @@ type Download struct {
 	TargetPath    string
 	ResourceName  string
 	TotalSections int
+}
+
+// NewDownload validates rawURL (it must be http or https with a host and contain
+// a resource name) and returns a Download of it into targetPath.
+func NewDownload(rawURL, targetPath string) (*Download, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, errInvalidURL
+	}
+	resourceName, err := resourceNameFromURL(u)
+	if err != nil {
+		return nil, err
+	}
+	return &Download{
+		URL:           rawURL,
+		TargetPath:    targetPath,
+		ResourceName:  resourceName,
+		TotalSections: sectionCount,
+	}, nil
 }
 
 func (download *Download) Do() (err error) {

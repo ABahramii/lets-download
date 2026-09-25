@@ -6,12 +6,17 @@ import (
 	"path"
 )
 
+var errInvalidURL = errors.New("URL is invalid")
+
 func ExtractResourceName(urlStr string) (resourceName string, err error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
-		return "", errors.New("URL is invalid")
+		return "", errInvalidURL
 	}
+	return resourceNameFromURL(u)
+}
 
+func resourceNameFromURL(u *url.URL) (string, error) {
 	// prefer `filename` query parameter if provided
 	if q := u.Query().Get("filename"); q != "" {
 		return path.Base(q), nil

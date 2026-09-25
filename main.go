@@ -1,20 +1,18 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"let_s_download/downloader"
-	neturl "net/url"
 	"os"
 	"time"
 )
 
 var (
-	currentDir, _ = os.Getwd()
-	url           = flag.String("url", "http://127.0.0.1:80/test_file", "URL for download file")
-	targetPath    = flag.String("targetPath", currentDir, "path for downloaded file")
-	filePath      = flag.String("f", "", "path of a file containing one download link per line (overrides -url)")
+	currentDir, _  = os.Getwd()
+	urlFlag        = flag.String("url", "http://127.0.0.1:80/test_file", "URL for download file")
+	targetPathFlag = flag.String("targetPath", currentDir, "path for downloaded file")
+	linksFileFlag  = flag.String("f", "", "path of a file containing one download link per line (overrides -url)")
 )
 
 const maxParallelDownloads = 4
@@ -23,23 +21,23 @@ func main() {
 	start := time.Now()
 	flag.Parse()
 
-	err := downloader.ValidateTargetPath(*targetPath)
+	err := downloader.ValidateTargetPath(*targetPathFlag)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(0)
 	}
 
-	if *filePath != "" {
-		downloadFromFile(*filePath, *targetPath)
+	if *linksFileFlag != "" {
+		downloadFromFile(*linksFileFlag, *targetPathFlag)
 	} else {
-		downloadSingle(*url, *targetPath)
+		downloadSingle(*urlFlag, *targetPathFlag)
 	}
 
 	fmt.Printf("Download completed in %v seconds\n", time.Now().Sub(start).Seconds())
 }
 
 func downloadSingle(url, targetPath string) {
-	download, err := newDownload(url, targetPath)
+	download, err := downloader.NewDownload(url, targetPath)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(0)
@@ -62,7 +60,7 @@ func downloadFromFile(filePath, targetPath string) {
 
 	var downloads []*downloader.Download
 	for _, link := range links {
-		download, err := newDownload(link, targetPath)
+		download, err := downloader.NewDownload(link, targetPath)
 		if err != nil {
 			fmt.Printf("skipping %s: %v\n", link, err)
 			continue
@@ -80,21 +78,4 @@ func downloadFromFile(filePath, targetPath string) {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
-}
-
-func newDownload(url, targetPath string) (*downloader.Download, error) {
-	u, err := neturl.Parse(url)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, errors.New("URL is invalid")
-	}
-	resourceName, err := downloader.ExtractResourceName(url)
-	if err != nil {
-		return nil, err
-	}
-	return &downloader.Download{
-		URL:           url,
-		TargetPath:    targetPath,
-		ResourceName:  resourceName,
-		TotalSections: 10,
-	}, nil
 }
