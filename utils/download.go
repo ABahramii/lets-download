@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -88,7 +89,11 @@ func DownloadAll(downloads []*Download, maxParallel int) error {
 }
 
 func (download *Download) getResourceSize() (int, error) {
-	response, err := download.requestResourceSize()
+	request, err := download.getNewRequest(http.MethodHead)
+	if err != nil {
+		return 0, err
+	}
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return 0, err
 	}
@@ -96,24 +101,12 @@ func (download *Download) getResourceSize() (int, error) {
 	fmt.Printf("status: %v\n", response.StatusCode)
 
 	if response.StatusCode > 299 {
-		return 0, errors.New(fmt.Sprintf("can't process, response code is %d", response.StatusCode))
+		return 0, fmt.Errorf("can't process, response code is %d", response.StatusCode)
 	}
 
 	totalSize := response.Header.Get("Content-Length")
 	fmt.Printf("file: %s\nsize: %s bytes\n", download.ResourceName, totalSize)
 	return strconv.Atoi(totalSize)
-}
-
-func (download *Download) requestResourceSize() (*http.Response, error) {
-	request, err := download.getNewRequest(http.MethodHead)
-	if err != nil {
-		return nil, err
-	}
-	response, err := httpClient.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	return response, nil
 }
 
 func (download *Download) getNewRequest(method string) (*http.Request, error) {
@@ -156,7 +149,7 @@ func (download *Download) concurrentDownload(sections [][2]int) error {
 	return nil
 }
 
-func (download *Download) downloadSection(offset int, section [2]int) error {
+func (download *Download) downloadSection(index int, section [2]int) error {
 	request, err := download.getNewRequest(http.MethodGet)
 	if err != nil {
 		return err
@@ -173,7 +166,7 @@ func (download *Download) downloadSection(offset int, section [2]int) error {
 		return fmt.Errorf("unexpected response code %d for range request", response.StatusCode)
 	}
 
-	file, err := os.Create(sectionFilePath(download.TargetPath, download.ResourceName, offset))
+	file, err := os.Create(sectionFilePath(download.TargetPath, download.ResourceName, index))
 	if err != nil {
 		return err
 	}
@@ -183,7 +176,7 @@ func (download *Download) downloadSection(offset int, section [2]int) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("downloaded %d bytes from section %d: %d\n", n, offset, section)
+	fmt.Printf("downloaded %d bytes from section %d: %d\n", n, index, section)
 
 	return file.Close()
 }
@@ -201,7 +194,7 @@ func (download *Download) removeTempFiles(sections [][2]int) error {
 // sectionFilePath includes the resource name so concurrent downloads
 // into the same directory don't overwrite each other's temp files.
 func sectionFilePath(targetPath, resourceName string, i int) string {
-	return fmt.Sprintf("%s/%s.section-%d.tmp", targetPath, resourceName, i)
+	return filepath.Join(targetPath, fmt.Sprintf("%s.section-%d.tmp", resourceName, i))
 }
 
 func makeSections(totalSections, totalSize int) [][2]int {
@@ -226,7 +219,7 @@ func makeSections(totalSections, totalSize int) [][2]int {
 }
 
 func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
-	filePath := fmt.Sprintf("%s/%s", targetPath, resourceName+".mp4")
+	filePath := filepath.Join(targetPath, resourceName+".mp4")
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return err
@@ -241,7 +234,6 @@ func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
 		if err != nil {
 			return err
 		}
-		//fmt.Printf("%v bytes merged\n", n)
 	}
 	return nil
 }
