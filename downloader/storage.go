@@ -25,8 +25,12 @@ func sectionFilePath(targetPath, resourceName string, i int) string {
 	return filepath.Join(targetPath, fmt.Sprintf("%s.section-%d.tmp", resourceName, i))
 }
 
+func outputFilePath(targetPath, resourceName string) string {
+	return filepath.Join(targetPath, resourceName+".mp4")
+}
+
 func mergeFiles(targetPath, resourceName string, sections []byteRange) error {
-	filePath := filepath.Join(targetPath, resourceName+".mp4")
+	filePath := outputFilePath(targetPath, resourceName)
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return err

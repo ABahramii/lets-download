@@ -83,17 +83,41 @@ func (download *Download) Do() (err error) {
 	return mergeFiles(download.TargetPath, download.ResourceName, sections)
 }
 
+// ErrDuplicateOutput is returned by DownloadAll for a download whose output file
+// is already used by an earlier download in the same batch.
+var ErrDuplicateOutput = errors.New("duplicate resource name")
+
 // DownloadAll downloads all given resources concurrently, at most maxParallel
 // at a time (maxParallel <= 0 means no limit).
+// Downloads that would write to the same output file as an earlier one in the
+// list are not started and are reported as errors.
 // A failed download does not stop the others; all failures are returned joined.
 func DownloadAll(downloads []*Download, maxParallel int) error {
-	errs := runParallel(len(downloads), maxParallel, func(i int) error {
-		if err := downloads[i].Do(); err != nil {
-			return fmt.Errorf("%s: %w", downloads[i].URL, err)
+	unique, errs := rejectDuplicateOutputs(downloads)
+	runErrs := runParallel(len(unique), maxParallel, func(i int) error {
+		if err := unique[i].Do(); err != nil {
+			return fmt.Errorf("%s: %w", unique[i].URL, err)
 		}
 		return nil
 	})
-	return errors.Join(errs...)
+	return errors.Join(append(errs, runErrs...)...)
+}
+
+// rejectDuplicateOutputs keeps the first download for each output file. Two
+// downloads with the same target path and resource name would share temp and
+// output files, corrupting each other when run concurrently.
+func rejectDuplicateOutputs(downloads []*Download) (unique []*Download, errs []error) {
+	firstURL := make(map[string]string, len(downloads))
+	for _, download := range downloads {
+		key := outputFilePath(download.TargetPath, download.ResourceName)
+		if url, ok := firstURL[key]; ok {
+			errs = append(errs, fmt.Errorf("%s: %w %q, already used by %s", download.URL, ErrDuplicateOutput, download.ResourceName, url))
+			continue
+		}
+		firstURL[key] = download.URL
+		unique = append(unique, download)
+	}
+	return unique, errs
 }
 
 func (download *Download) getResourceSize() (int, error) {

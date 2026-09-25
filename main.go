@@ -59,7 +59,14 @@ func downloadFromFile(filePath, targetPath string) {
 	}
 
 	var downloads []*downloader.Download
+	seen := make(map[string]bool, len(links))
 	for _, link := range links {
+		if seen[link] {
+			fmt.Printf("skipping %s: duplicate link\n", link)
+			continue
+		}
+		seen[link] = true
+
 		download, err := downloader.NewDownload(link, targetPath)
 		if err != nil {
 			fmt.Printf("skipping %s: %v\n", link, err)

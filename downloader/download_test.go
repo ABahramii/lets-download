@@ -3,6 +3,7 @@ package downloader
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -255,4 +256,47 @@ func TestNewDownload_Invalid(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDownloadAll_DuplicateResourceName(t *testing.T) {
+	first := randomBytes(t, 6_000)
+	second := randomBytes(t, 7_000)
+	server := newFileServer(t, map[string][]byte{"a/video": first, "b/video": second})
+	targetPath := t.TempDir()
+
+	duplicateURL := server.URL + "/b/video"
+	downloads := []*Download{
+		newTestDownload(server.URL+"/a/video", targetPath, "video"),
+		newTestDownload(duplicateURL, targetPath, "video"),
+	}
+
+	err := DownloadAll(downloads, 2)
+	if !errors.Is(err, ErrDuplicateOutput) {
+		t.Fatalf("expected ErrDuplicateOutput, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), duplicateURL) {
+		t.Fatalf("error should mention %s, got: %v", duplicateURL, err)
+	}
+
+	// the first download in the list wins and is not corrupted by the duplicate
+	assertDownloaded(t, targetPath, "video", first)
+	assertNoTempFiles(t, targetPath)
+}
+
+func TestDownloadAll_SameNameDifferentTargetPaths(t *testing.T) {
+	first := randomBytes(t, 6_000)
+	second := randomBytes(t, 7_000)
+	server := newFileServer(t, map[string][]byte{"a/video": first, "b/video": second})
+	firstPath, secondPath := t.TempDir(), t.TempDir()
+
+	downloads := []*Download{
+		newTestDownload(server.URL+"/a/video", firstPath, "video"),
+		newTestDownload(server.URL+"/b/video", secondPath, "video"),
+	}
+
+	if err := DownloadAll(downloads, 2); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertDownloaded(t, firstPath, "video", first)
+	assertDownloaded(t, secondPath, "video", second)
 }
