@@ -282,28 +282,42 @@ func TestNewDownload_Invalid(t *testing.T) {
 }
 
 func TestDownloadAll_DuplicateResourceName(t *testing.T) {
-	first := randomBytes(t, 6_000)
-	second := randomBytes(t, 7_000)
-	server := newFileServer(t, map[string][]byte{"a/video": first, "b/video": second})
-	targetPath := t.TempDir()
-
-	duplicateURL := server.URL + "/b/video"
-	downloads := []*Download{
-		newTestDownload(server.URL+"/a/video", targetPath, "video"),
-		newTestDownload(duplicateURL, targetPath, "video"),
+	tests := []struct {
+		name       string
+		firstName  string
+		secondName string
+	}{
+		{name: "same name", firstName: "video", secondName: "video"},
+		// the same file on case-insensitive disks (macOS, Windows)
+		{name: "names differ only in case", firstName: "Video", secondName: "video"},
 	}
 
-	err := DownloadAll(downloads, 2)
-	if !errors.Is(err, ErrDuplicateOutput) {
-		t.Fatalf("expected ErrDuplicateOutput, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), duplicateURL) {
-		t.Fatalf("error should mention %s, got: %v", duplicateURL, err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			first := randomBytes(t, 6_000)
+			second := randomBytes(t, 7_000)
+			server := newFileServer(t, map[string][]byte{"a/" + tt.firstName: first, "b/" + tt.secondName: second})
+			targetPath := t.TempDir()
 
-	// the first download in the list wins and is not corrupted by the duplicate
-	assertDownloaded(t, targetPath, "video", first)
-	assertNoTempFiles(t, targetPath)
+			duplicateURL := server.URL + "/b/" + tt.secondName
+			downloads := []*Download{
+				newTestDownload(server.URL+"/a/"+tt.firstName, targetPath, tt.firstName),
+				newTestDownload(duplicateURL, targetPath, tt.secondName),
+			}
+
+			err := DownloadAll(downloads, 2)
+			if !errors.Is(err, ErrDuplicateOutput) {
+				t.Fatalf("expected ErrDuplicateOutput, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), duplicateURL) {
+				t.Fatalf("error should mention %s, got: %v", duplicateURL, err)
+			}
+
+			// the first download in the list wins and is not corrupted by the duplicate
+			assertDownloaded(t, targetPath, tt.firstName, first)
+			assertNoTempFiles(t, targetPath)
+		})
+	}
 }
 
 func TestDownloadAll_SameNameDifferentTargetPaths(t *testing.T) {

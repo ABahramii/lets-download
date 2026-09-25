@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -110,10 +111,13 @@ func DownloadAll(downloads []*Download, maxParallel int) error {
 // rejectDuplicateOutputs keeps the first download for each output file. Two
 // downloads with the same target path and resource name would share temp and
 // output files, corrupting each other when run concurrently.
+// Paths are compared ignoring case, because on case-insensitive disks (the
+// default on macOS and Windows) "Video" and "video" are the same file. On a
+// case-sensitive disk this rejects some pairs that would not have clashed.
 func rejectDuplicateOutputs(downloads []*Download) (unique []*Download, errs []error) {
 	firstURL := make(map[string]string, len(downloads))
 	for _, download := range downloads {
-		key := outputFilePath(download.TargetPath, download.ResourceName)
+		key := strings.ToLower(outputFilePath(download.TargetPath, download.ResourceName))
 		if url, ok := firstURL[key]; ok {
 			errs = append(errs, fmt.Errorf("%s: %w %q, already used by %s", download.URL, ErrDuplicateOutput, download.ResourceName, url))
 			continue
