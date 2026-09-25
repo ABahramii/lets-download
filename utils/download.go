@@ -43,6 +43,32 @@ func (download *Download) Do() error {
 	return nil
 }
 
+// DownloadAll downloads all given resources concurrently.
+// A failed download does not stop the others; all failures are returned joined.
+func DownloadAll(downloads []*Download) error {
+	var wg sync.WaitGroup
+	wg.Add(len(downloads))
+	errorsCh := make(chan error, len(downloads))
+
+	for _, download := range downloads {
+		go func(download *Download) {
+			defer wg.Done()
+			if err := download.Do(); err != nil {
+				errorsCh <- fmt.Errorf("%s: %w", download.URL, err)
+			}
+		}(download)
+	}
+
+	wg.Wait()
+	close(errorsCh)
+
+	var errs []error
+	for err := range errorsCh {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
 func (download *Download) getResourceSize() (int, error) {
 	response, err := download.requestResourceSize()
 	if err != nil {
@@ -122,6 +148,7 @@ func (download *Download) downloadSection(offset int, section [2]int) error {
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	b, err := io.ReadAll(response.Body)
 	fmt.Printf("downloaded %v bytes from section %d: %d\n", response.Header.Get("Content-Length"), offset, section)
@@ -129,7 +156,7 @@ func (download *Download) downloadSection(offset int, section [2]int) error {
 		return err
 	}
 
-	err = os.WriteFile(fmt.Sprintf("%s/section-%d.tmp", download.TargetPath, offset), b, os.ModePerm)
+	err = os.WriteFile(sectionFilePath(download.TargetPath, download.ResourceName, offset), b, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -139,12 +166,18 @@ func (download *Download) downloadSection(offset int, section [2]int) error {
 
 func (download *Download) removeTempFiles(sections [][2]int) error {
 	for i := range sections {
-		err := os.Remove(fmt.Sprintf("%s/section-%d.tmp", download.TargetPath, i))
+		err := os.Remove(sectionFilePath(download.TargetPath, download.ResourceName, i))
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// sectionFilePath includes the resource name so concurrent downloads
+// into the same directory don't overwrite each other's temp files.
+func sectionFilePath(targetPath, resourceName string, i int) string {
+	return fmt.Sprintf("%s/%s.section-%d.tmp", targetPath, resourceName, i)
 }
 
 func makeSections(totalSections, totalSize int) [][2]int {
@@ -176,7 +209,7 @@ func mergeFiles(targetPath, resourceName string, sections [][2]int) error {
 	}
 	defer file.Close()
 	for i := range sections {
-		b, err := os.ReadFile(fmt.Sprintf("%s/section-%d.tmp", targetPath, i))
+		b, err := os.ReadFile(sectionFilePath(targetPath, resourceName, i))
 		if err != nil {
 			return err
 		}
