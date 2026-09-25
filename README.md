@@ -13,7 +13,14 @@ download multiple links concurrently from a file (one link per line, blank lines
 go run main.go -f=links.txt -targetPath=./
 ```
 
-run and test using nginx
+run and test using nginx (needs Docker; the script runs `../main.go`, so run it from `bin/`)
 ```sh
-./lets-download.sh
+cd bin
+./lets-download.sh                     # default URL and target path
+./lets-download.sh <url> <targetPath>
+```
+
+run tests
+```sh
+go test ./... -race
 ```
