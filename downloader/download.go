@@ -29,6 +29,16 @@ type Download struct {
 	TargetPath    string
 	ResourceName  string
 	TotalSections int
+	// Out receives progress messages; nil means os.Stdout.
+	// Sections write to it concurrently, so it must be safe for concurrent use.
+	Out io.Writer
+}
+
+func (download *Download) out() io.Writer {
+	if download.Out == nil {
+		return os.Stdout
+	}
+	return download.Out
 }
 
 // NewDownload validates rawURL (it must be http or https with a host and contain
@@ -51,7 +61,7 @@ func NewDownload(rawURL, targetPath string) (*Download, error) {
 }
 
 func (download *Download) Do() (err error) {
-	fmt.Println("making connection")
+	fmt.Fprintln(download.out(), "making connection")
 	totalSize, err := download.getResourceSize()
 	if err != nil {
 		return err
@@ -96,14 +106,14 @@ func (download *Download) getResourceSize() (int, error) {
 		return 0, err
 	}
 	defer response.Body.Close()
-	fmt.Printf("status: %v\n", response.StatusCode)
+	fmt.Fprintf(download.out(), "status: %v\n", response.StatusCode)
 
 	if response.StatusCode > 299 {
 		return 0, fmt.Errorf("can't process, response code is %d", response.StatusCode)
 	}
 
 	totalSize := response.Header.Get("Content-Length")
-	fmt.Printf("file: %s\nsize: %s bytes\n", download.ResourceName, totalSize)
+	fmt.Fprintf(download.out(), "file: %s\nsize: %s bytes\n", download.ResourceName, totalSize)
 	return strconv.Atoi(totalSize)
 }
 
@@ -160,7 +170,7 @@ func (download *Download) downloadSection(index int, section byteRange) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("downloaded %d bytes from section %d: [%d %d]\n", n, index, section.start, section.end)
+	fmt.Fprintf(download.out(), "downloaded %d bytes from section %d: [%d %d]\n", n, index, section.start, section.end)
 
 	return file.Close()
 }

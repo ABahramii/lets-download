@@ -3,12 +3,14 @@ package downloader
 import (
 	"bytes"
 	"crypto/rand"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,6 +47,50 @@ func newTestDownload(url, targetPath, resourceName string) *Download {
 		TargetPath:    targetPath,
 		ResourceName:  resourceName,
 		TotalSections: 10,
+		Out:           io.Discard,
+	}
+}
+
+// syncBuffer is a bytes.Buffer that is safe for concurrent writes.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestDownload_WritesProgressToOut(t *testing.T) {
+	content := randomBytes(t, 1_000)
+	server := newFileServer(t, map[string][]byte{"file": content})
+	var out syncBuffer
+
+	d := newTestDownload(server.URL+"/file", t.TempDir(), "file")
+	d.Out = &out
+	if err := d.Do(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"making connection\n",
+		"status: 200\n",
+		"file: file\nsize: 1000 bytes\n",
+		"downloaded 100 bytes from section 0: [0 99]\n",
+		"downloaded 100 bytes from section 9: [900 1000]\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
 	}
 }
 
