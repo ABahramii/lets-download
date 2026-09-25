@@ -35,7 +35,8 @@ func TestMergeFiles(t *testing.T) {
 }
 
 // current behavior: an existing output file is appended to, not replaced
-func TestMergeFiles_AppendsToExistingFile(t *testing.T) {
+// a re-run must replace the output file, not append to it
+func TestMergeFiles_ReplacesExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "video.mp4"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
@@ -50,8 +51,42 @@ func TestMergeFiles_AppendsToExistingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "oldnew" {
-		t.Fatalf("got %q, want %q", got, "oldnew")
+	if string(got) != "new" {
+		t.Fatalf("got %q, want %q", got, "new")
+	}
+	assertNoPartFiles(t, dir)
+}
+
+func TestMergeFiles_FailureKeepsExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "video.mp4"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// section 0 exists, section 1 is missing, so the merge fails partway
+	sections := append(writeSections(t, dir, "video", []string{"new"}), byteRange{})
+
+	if err := mergeFiles(dir, "video", sections); err == nil {
+		t.Fatal("expected error for missing section file")
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "video.mp4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "old" {
+		t.Fatalf("existing output changed: got %q, want %q", got, "old")
+	}
+	assertNoPartFiles(t, dir)
+}
+
+func assertNoPartFiles(t *testing.T, dir string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, "*.part"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("partial files left behind: %v", matches)
 	}
 }
 

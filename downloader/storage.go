@@ -29,19 +29,33 @@ func outputFilePath(targetPath, resourceName string) string {
 	return filepath.Join(targetPath, resourceName+".mp4")
 }
 
-func mergeFiles(targetPath, resourceName string, sections []byteRange) error {
+// mergeFiles joins the sections into a ".part" file and renames it over the
+// output file only when the merge succeeded. A re-run replaces an existing
+// output file instead of appending to it, and a failed merge leaves any
+// existing output file untouched.
+func mergeFiles(targetPath, resourceName string, sections []byteRange) (err error) {
 	filePath := outputFilePath(targetPath, resourceName)
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
+	partPath := filePath + ".part"
+	file, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err != nil {
+			file.Close()
+			os.Remove(partPath)
+		}
+	}()
+
 	for i := range sections {
 		if err := appendFile(file, sectionFilePath(targetPath, resourceName, i)); err != nil {
 			return err
 		}
 	}
-	return nil
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(partPath, filePath)
 }
 
 // appendFile streams the file at path into dst without loading it into memory.

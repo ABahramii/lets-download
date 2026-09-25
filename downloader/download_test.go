@@ -300,3 +300,19 @@ func TestDownloadAll_SameNameDifferentTargetPaths(t *testing.T) {
 	assertDownloaded(t, firstPath, "video", first)
 	assertDownloaded(t, secondPath, "video", second)
 }
+
+// a re-run must leave exactly one copy of the file, not two appended together
+func TestDownload_RerunReplacesOutput(t *testing.T) {
+	content := randomBytes(t, 5_000)
+	server := newFileServer(t, map[string][]byte{"file": content})
+	targetPath := t.TempDir()
+
+	for run := 1; run <= 2; run++ {
+		if err := newTestDownload(server.URL+"/file", targetPath, "file").Do(); err != nil {
+			t.Fatalf("run %d: unexpected error: %v", run, err)
+		}
+	}
+
+	assertDownloaded(t, targetPath, "file", content)
+	assertNoTempFiles(t, targetPath)
+}
