@@ -9,22 +9,25 @@ type byteRange struct {
 	end   int
 }
 
+// makeSections splits totalSize bytes into inclusive ranges that together cover
+// bytes 0 to totalSize-1: sectionCount ranges, or one per byte for files smaller
+// than that, and none for an empty file. The last range also takes the remainder.
+// TODO: totalSections is ignored; sectionCount is always used.
 func makeSections(totalSections, totalSize int) []byteRange {
-	sections := make([]byteRange, totalSections)
+	count := min(sectionCount, totalSize)
+	if count <= 0 {
+		return nil
+	}
 
-	sectionSize := totalSize / sectionCount
-	remain := totalSize % sectionCount
-	start := 0
-	var end int
-
-	for i := 0; i < sectionCount; i++ {
-		if i == sectionCount-1 {
-			end = start + sectionSize + remain
-		} else {
-			end = start + sectionSize - 1
+	sectionSize := totalSize / count
+	sections := make([]byteRange, count)
+	for i := range sections {
+		start := i * sectionSize
+		end := start + sectionSize - 1
+		if i == count-1 {
+			end = totalSize - 1
 		}
 		sections[i] = byteRange{start: start, end: end}
-		start = end + 1
 	}
 	return sections
 }

@@ -87,7 +87,7 @@ func TestDownload_WritesProgressToOut(t *testing.T) {
 		"status: 200\n",
 		"file: file\nsize: 1000 bytes\n",
 		"downloaded 100 bytes from section 0: [0 99]\n",
-		"downloaded 100 bytes from section 9: [900 1000]\n",
+		"downloaded 100 bytes from section 9: [900 999]\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output missing %q:\n%s", want, got)
@@ -315,4 +315,21 @@ func TestDownload_RerunReplacesOutput(t *testing.T) {
 
 	assertDownloaded(t, targetPath, "file", content)
 	assertNoTempFiles(t, targetPath)
+}
+
+// files smaller than the section count, and empty files, must download correctly
+func TestDownload_SmallFiles(t *testing.T) {
+	for _, size := range []int{0, 1, 5, 9, 10, 11} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			content := randomBytes(t, size)
+			server := newFileServer(t, map[string][]byte{"file": content})
+			targetPath := t.TempDir()
+
+			if err := newTestDownload(server.URL+"/file", targetPath, "file").Do(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			assertDownloaded(t, targetPath, "file", content)
+			assertNoTempFiles(t, targetPath)
+		})
+	}
 }
