@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,8 +13,9 @@ import (
 	"time"
 )
 
-// httpClient has no overall timeout so large downloads aren't cut off,
-// but a server that stops responding won't hang the download forever.
+// httpClient has no overall timeout so large downloads aren't cut off. These
+// timeouts only cover connecting and waiting for response headers; a section
+// whose body stops arriving is aborted by sectionIdleTimeout instead.
 var httpClient = &http.Client{
 	Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
@@ -170,14 +172,18 @@ func (download *Download) concurrentDownload(sections []byteRange) error {
 }
 
 func (download *Download) downloadSection(index int, section byteRange) error {
+	ctx, watchdog := withIdleTimeout(context.Background(), sectionIdleTimeout)
+	defer watchdog.stop()
+
 	request, err := download.getNewRequest(http.MethodGet)
 	if err != nil {
 		return err
 	}
+	request = request.WithContext(ctx)
 	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", section.start, section.end))
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return err
+		return watchdog.err(err)
 	}
 	defer response.Body.Close()
 
@@ -192,9 +198,9 @@ func (download *Download) downloadSection(index int, section byteRange) error {
 	}
 	defer file.Close()
 
-	n, err := io.Copy(file, response.Body)
+	n, err := io.Copy(file, watchdog.reader(response.Body))
 	if err != nil {
-		return err
+		return watchdog.err(err)
 	}
 	fmt.Fprintf(download.out(), "downloaded %d bytes from section %d: [%d %d]\n", n, index, section.start, section.end)
 
