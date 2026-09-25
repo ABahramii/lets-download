@@ -4,7 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"let_s_download/utils"
+	"let_s_download/downloader"
 	neturl "net/url"
 	"os"
 	"time"
@@ -23,7 +23,7 @@ func main() {
 	start := time.Now()
 	flag.Parse()
 
-	err := utils.ValidateTargetPath(*targetPath)
+	err := downloader.ValidateTargetPath(*targetPath)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(0)
@@ -54,13 +54,13 @@ func downloadSingle(url, targetPath string) {
 }
 
 func downloadFromFile(filePath, targetPath string) {
-	links, err := utils.ReadLinks(filePath)
+	links, err := downloader.ReadLinks(filePath)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
 
-	var downloads []*utils.Download
+	var downloads []*downloader.Download
 	for _, link := range links {
 		download, err := newDownload(link, targetPath)
 		if err != nil {
@@ -74,7 +74,7 @@ func downloadFromFile(filePath, targetPath string) {
 		os.Exit(1)
 	}
 
-	err = utils.DownloadAll(downloads, maxParallelDownloads)
+	err = downloader.DownloadAll(downloads, maxParallelDownloads)
 	if err != nil {
 		fmt.Println("Some downloads failed:")
 		fmt.Println(err.Error())
@@ -82,16 +82,16 @@ func downloadFromFile(filePath, targetPath string) {
 	}
 }
 
-func newDownload(url, targetPath string) (*utils.Download, error) {
+func newDownload(url, targetPath string) (*downloader.Download, error) {
 	u, err := neturl.Parse(url)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("URL is invalid")
 	}
-	resourceName, err := utils.ExtractResourceName(url)
+	resourceName, err := downloader.ExtractResourceName(url)
 	if err != nil {
 		return nil, err
 	}
-	return &utils.Download{
+	return &downloader.Download{
 		URL:           url,
 		TargetPath:    targetPath,
 		ResourceName:  resourceName,

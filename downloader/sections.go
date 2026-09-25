@@ -1,4 +1,4 @@
-package utils
+package downloader
 
 // sectionCount is how many byte ranges a file is split into.
 const sectionCount = 10
