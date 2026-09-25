@@ -1,26 +1,141 @@
 # Let's Download
-Let's Download is a simple project for concurrent file downloading.
+
+Let's Download is a command-line tool, written in Go, that speeds up file downloads by splitting each file into byte ranges and fetching them in parallel. It can download a single URL, or a list of URLs from a file with several downloads running at once.
+
+It uses only the Go standard library.
+
+## Features
+
+- **Parallel range downloads.** Each file is split into 10 sections that are fetched concurrently with HTTP `Range` requests, then joined into one output file.
+- **Batch mode.** Download every link in a text file, with at most 4 files downloading at the same time.
+- **Isolated failures.** In batch mode, one failed download doesn't stop the others. All errors are reported together at the end.
+- **Safe temp files.** Sections are written to temporary files that are always removed, even when a download fails. Their names include the file name, so parallel downloads into the same directory don't collide.
+- **Timeouts that don't cut off large files.** Connecting and waiting for response headers time out, but there is no limit on the total download time.
+
+## Requirements
+
+- Go 1.21 or later
+- A server that supports HTTP range requests (it must answer a `HEAD` request with `Content-Length` and answer ranged `GET` requests with `206 Partial Content`)
+- Docker, only if you want to use the end-to-end test script
 
 ## Quickstart
 
-sample run
+Download a single file:
+
 ```sh
 go run main.go -url=http://127.0.0.1:80/test_file -targetPath=./
 ```
 
-download multiple links concurrently from a file (one link per line, blank lines and `#` comments are ignored)
+Download several files listed in a text file:
+
 ```sh
 go run main.go -f=links.txt -targetPath=./
 ```
 
-run and test using nginx (needs Docker; the script runs `../main.go`, so run it from `bin/`)
+You can also build a binary:
+
 ```sh
-cd bin
-./lets-download.sh                     # default URL and target path
-./lets-download.sh <url> <targetPath>
+go build -o lets-download .
+./lets-download -url=https://example.com/video -targetPath=./downloads
 ```
 
-run tests
+## Command-line flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-url` | `http://127.0.0.1:80/test_file` | URL of the file to download. Must be `http` or `https`. |
+| `-targetPath` | current directory | Directory to save files in. It must already exist. |
+| `-f` | *(empty)* | Path of a links file. When set, it overrides `-url`. |
+
+## Links file format
+
+One URL per line. Blank lines and lines starting with `#` are ignored, and surrounding whitespace is trimmed. Lines can be up to 1 MB, so long signed URLs work.
+
+```text
+# videos
+https://example.com/files/intro
+https://example.com/download?id=42&filename=lecture-2
+
+https://cdn.example.com/files/outro
+```
+
+Invalid links (bad URL, non-http scheme, or no file name) are skipped with a message, and the rest are downloaded. If no valid links remain, the program exits with status 1.
+
+## Output file names
+
+The file name is taken from the URL:
+
+1. If the URL has a `filename` query parameter, its value is used (`...?filename=lecture-2` gives `lecture-2`).
+2. Otherwise, the last part of the URL path is used (`.../files/intro` gives `intro`).
+
+The output is saved as `<name>.mp4` in the target directory. See [Known limitations](#known-limitations).
+
+## How it works
+
+For each file, `Download.Do()` in `downloader/download.go`:
+
+1. Sends a `HEAD` request and reads `Content-Length` to get the file size.
+2. Splits the file into 10 byte ranges (`downloader/sections.go`).
+3. Downloads every range at the same time with a `GET` request and a `Range` header. Each response must be `206 Partial Content` and is streamed to `<name>.section-N.tmp` in the target directory.
+4. Joins the sections, in order, into `<name>.mp4.part`, then renames it over the output file once the merge has succeeded (`downloader/storage.go`). A re-run replaces an existing output file, and a failed merge leaves it untouched.
+5. Removes the temp files, whether or not the download succeeded.
+
+In batch mode, `DownloadAll` runs up to 4 of these at once. Both the section downloads and the batch downloads use the same limited fan-out helper in `downloader/parallel.go`.
+
+## Project structure
+
+```text
+.
+├── main.go                  # CLI: flags, single and batch mode
+├── downloader/
+│   ├── download.go          # Download type, HTTP client, Do() and DownloadAll()
+│   ├── parallel.go          # runParallel: concurrent fan-out with a limit
+│   ├── sections.go          # splitting a file into byte ranges
+│   ├── storage.go           # temp files, merging, target path validation
+│   ├── parser.go            # getting the file name from a URL
+│   ├── links.go             # reading the links file
+│   └── *_test.go            # unit tests
+└── bin/
+    └── lets-download.sh     # end-to-end test with nginx in Docker
+```
+
+## Testing
+
+Run all unit tests with the race detector:
+
 ```sh
 go test ./... -race
 ```
+
+Run a single test:
+
+```sh
+go test ./downloader -run TestDownloadAll_PartialFailure -v
+```
+
+Tests use `net/http/httptest` servers, so they don't need network access.
+
+Check formatting and run `go vet`:
+
+```sh
+gofmt -l . && go vet ./...
+```
+
+### End-to-end test with nginx
+
+`bin/lets-download.sh` creates a 500 MB file of zeros, serves it from an nginx Docker container on port 80, runs the downloader against it, and then cleans up. It runs `../main.go`, so start it from `bin/`:
+
+```sh
+cd bin
+./lets-download.sh                       # default URL and target path
+./lets-download.sh <url> <targetPath>
+```
+
+Port 80 must be free, and no other container may be named `nginx`.
+
+## Known limitations
+
+- Output files always get a `.mp4` extension, whatever the real file type is.
+- Servers that don't support range requests, or that don't send `Content-Length`, are not supported.
+- There is no resume support. An interrupted download has to start over.
+- In single-URL mode, a failed download ends with a panic instead of a clean error message.
