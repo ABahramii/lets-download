@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -68,32 +67,12 @@ func (download *Download) Do() (err error) {
 // at a time (maxParallel <= 0 means no limit).
 // A failed download does not stop the others; all failures are returned joined.
 func DownloadAll(downloads []*Download, maxParallel int) error {
-	if maxParallel <= 0 {
-		maxParallel = len(downloads)
-	}
-	var wg sync.WaitGroup
-	wg.Add(len(downloads))
-	errorsCh := make(chan error, len(downloads))
-	semaphore := make(chan struct{}, maxParallel)
-
-	for _, download := range downloads {
-		go func(download *Download) {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-			if err := download.Do(); err != nil {
-				errorsCh <- fmt.Errorf("%s: %w", download.URL, err)
-			}
-		}(download)
-	}
-
-	wg.Wait()
-	close(errorsCh)
-
-	var errs []error
-	for err := range errorsCh {
-		errs = append(errs, err)
-	}
+	errs := runParallel(len(downloads), maxParallel, func(i int) error {
+		if err := downloads[i].Do(); err != nil {
+			return fmt.Errorf("%s: %w", downloads[i].URL, err)
+		}
+		return nil
+	})
 	return errors.Join(errs...)
 }
 
@@ -132,29 +111,15 @@ func (download *Download) getNewRequest(method string) (*http.Request, error) {
 }
 
 func (download *Download) concurrentDownload(sections []byteRange) error {
-	var wg sync.WaitGroup
-	wg.Add(len(sections))
-	errorsCh := make(chan error, len(sections))
-
-	for i, section := range sections {
-		go func(i int, section byteRange) {
-			defer wg.Done()
-			if err := download.downloadSection(i, section); err != nil {
-				errorsCh <- fmt.Errorf("failed to download section %download: %w", i, err)
-				return
-			}
-		}(i, section)
-	}
-
-	wg.Wait()
-	close(errorsCh)
-
-	for err := range errorsCh {
-		if err != nil {
-			return err
+	errs := runParallel(len(sections), 0, func(i int) error {
+		if err := download.downloadSection(i, sections[i]); err != nil {
+			return fmt.Errorf("failed to download section %download: %w", i, err)
 		}
+		return nil
+	})
+	if len(errs) > 0 {
+		return errs[0]
 	}
-
 	return nil
 }
 
