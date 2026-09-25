@@ -234,14 +234,21 @@ func mergeFiles(targetPath, resourceName string, sections []byteRange) error {
 	}
 	defer file.Close()
 	for i := range sections {
-		b, err := os.ReadFile(sectionFilePath(targetPath, resourceName, i))
-		if err != nil {
-			return err
-		}
-		_, err = file.Write(b)
-		if err != nil {
+		if err := appendFile(file, sectionFilePath(targetPath, resourceName, i)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// appendFile streams the file at path into dst without loading it into memory.
+func appendFile(dst io.Writer, path string) error {
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	_, err = io.Copy(dst, src)
+	return err
 }
