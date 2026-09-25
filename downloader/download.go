@@ -25,9 +25,11 @@ var httpClient = &http.Client{
 }
 
 type Download struct {
-	URL           string
-	TargetPath    string
-	ResourceName  string
+	URL          string
+	TargetPath   string
+	ResourceName string
+	// TotalSections is how many byte ranges are downloaded in parallel for this
+	// file; 0 or less means defaultSectionCount (10).
 	TotalSections int
 	// Out receives progress messages; nil means os.Stdout.
 	// Sections write to it concurrently, so it must be safe for concurrent use.
@@ -56,7 +58,7 @@ func NewDownload(rawURL, targetPath string) (*Download, error) {
 		URL:           rawURL,
 		TargetPath:    targetPath,
 		ResourceName:  resourceName,
-		TotalSections: sectionCount,
+		TotalSections: defaultSectionCount,
 	}, nil
 }
 

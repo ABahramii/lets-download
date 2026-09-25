@@ -333,3 +333,37 @@ func TestDownload_SmallFiles(t *testing.T) {
 		})
 	}
 }
+
+// Download.TotalSections controls how many range requests are made
+func TestDownload_UsesTotalSections(t *testing.T) {
+	for _, totalSections := range []int{0, 1, 3, 25} {
+		t.Run(strconv.Itoa(totalSections), func(t *testing.T) {
+			content := randomBytes(t, 1_000)
+			var rangeRequests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Range") != "" {
+					rangeRequests.Add(1)
+				}
+				http.ServeContent(w, r, "file", time.Time{}, bytes.NewReader(content))
+			}))
+			t.Cleanup(server.Close)
+			targetPath := t.TempDir()
+
+			d := newTestDownload(server.URL+"/file", targetPath, "file")
+			d.TotalSections = totalSections
+			if err := d.Do(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			want := int32(totalSections)
+			if totalSections <= 0 {
+				want = defaultSectionCount
+			}
+			if got := rangeRequests.Load(); got != want {
+				t.Fatalf("got %d range requests, want %d", got, want)
+			}
+			assertDownloaded(t, targetPath, "file", content)
+			assertNoTempFiles(t, targetPath)
+		})
+	}
+}
