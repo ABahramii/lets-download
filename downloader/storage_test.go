@@ -6,107 +6,49 @@ import (
 	"testing"
 )
 
-func writeSections(t *testing.T, targetPath, resourceName string, contents []string) []byteRange {
-	t.Helper()
-	sections := make([]byteRange, len(contents))
-	for i, content := range contents {
-		if err := os.WriteFile(sectionFilePath(targetPath, resourceName, i), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return sections
-}
-
-func TestMergeFiles(t *testing.T) {
-	dir := t.TempDir()
-	sections := writeSections(t, dir, "video", []string{"aaa", "bbb", "ccc"})
-
-	if err := mergeFiles(dir, "video", sections); err != nil {
+func TestCreatePartFile(t *testing.T) {
+	path := partFilePath(t.TempDir(), "video")
+	file, err := createPartFile(path, 1_000)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	defer file.Close()
 
-	got, err := os.ReadFile(filepath.Join(dir, "video"))
+	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "aaabbbccc" {
-		t.Fatalf("got %q, want %q", got, "aaabbbccc")
+	if info.Size() != 1_000 {
+		t.Fatalf("size = %d, want 1000", info.Size())
 	}
 }
 
-// current behavior: an existing output file is appended to, not replaced
-// a re-run must replace the output file, not append to it
-func TestMergeFiles_ReplacesExistingFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "video"), []byte("old"), 0o644); err != nil {
+// a part file left over from an interrupted run must not leak into the new one
+func TestCreatePartFile_TruncatesStaleFile(t *testing.T) {
+	path := partFilePath(t.TempDir(), "video")
+	if err := os.WriteFile(path, []byte("stale data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sections := writeSections(t, dir, "video", []string{"new"})
 
-	if err := mergeFiles(dir, "video", sections); err != nil {
+	file, err := createPartFile(path, 3)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	file.Close()
 
-	got, err := os.ReadFile(filepath.Join(dir, "video"))
+	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "new" {
-		t.Fatalf("got %q, want %q", got, "new")
-	}
-	assertNoPartFiles(t, dir)
-}
-
-func TestMergeFiles_FailureKeepsExistingFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "video"), []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// section 0 exists, section 1 is missing, so the merge fails partway
-	sections := append(writeSections(t, dir, "video", []string{"new"}), byteRange{})
-
-	if err := mergeFiles(dir, "video", sections); err == nil {
-		t.Fatal("expected error for missing section file")
-	}
-
-	got, err := os.ReadFile(filepath.Join(dir, "video"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "old" {
-		t.Fatalf("existing output changed: got %q, want %q", got, "old")
-	}
-	assertNoPartFiles(t, dir)
-}
-
-func assertNoPartFiles(t *testing.T, dir string) {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(dir, "*.part"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 0 {
-		t.Fatalf("partial files left behind: %v", matches)
+	if string(got) != "\x00\x00\x00" {
+		t.Fatalf("got %q, want 3 zero bytes", got)
 	}
 }
 
-func TestMergeFiles_MissingSection(t *testing.T) {
-	dir := t.TempDir()
-	if err := mergeFiles(dir, "video", make([]byteRange, 1)); err == nil {
-		t.Fatal("expected error for missing section file")
+func TestPartFilePath_Hidden(t *testing.T) {
+	if got, want := partFilePath("dir", "video"), filepath.Join("dir", ".video.part"); got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
-}
-
-func TestRemoveTempFiles_IgnoresMissing(t *testing.T) {
-	dir := t.TempDir()
-	sections := writeSections(t, dir, "video", []string{"a"})
-	sections = append(sections, byteRange{}) // section 1 was never written
-
-	d := &Download{TargetPath: dir, ResourceName: "video"}
-	if err := d.removeTempFiles(sections); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	assertNoTempFiles(t, dir)
 }
 
 func TestValidateTargetPath(t *testing.T) {

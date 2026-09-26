@@ -9,7 +9,7 @@ Its only dependency is [mpb](https://github.com/vbauerster/mpb), which draws the
 - **Parallel range downloads.** Each file is split into 10 sections that are fetched concurrently with HTTP `Range` requests, then joined into one output file.
 - **Batch mode.** Download every link in a text file, with at most 4 files downloading at the same time.
 - **Isolated failures.** In batch mode, one failed download doesn't stop the others. All errors are reported together at the end.
-- **Safe temp files.** Sections are written to temporary files that are always removed, even when a download fails. Their names include the file name, so parallel downloads into the same directory don't collide.
+- **One hidden temp file.** While a file downloads, all sections write straight into a single hidden `.<name>.part` file next to it. There are no per-section files and no merge step. It is renamed to `<name>` on success and removed on failure, so an existing file is never half-overwritten.
 - **Progress bars.** Each file gets a coloured live bar with size, percentage, speed and ETA. The bar is split into one segment per section, so you can see each section fill at its own pace. Set `NO_COLOR` to turn colours off. Bars are shown only when stdout is a terminal. Otherwise, or with `-progress=false`, text messages are printed instead.
 - **Timeouts that don't cut off large files.** Connecting and waiting for response headers time out, but there is no limit on the total download time.
 
@@ -78,9 +78,9 @@ For each file, `Download.Do()` in `downloader/download.go`:
 
 1. Sends a `HEAD` request and reads `Content-Length` to get the file size.
 2. Splits the file into 10 byte ranges (`downloader/sections.go`).
-3. Downloads every range at the same time with a `GET` request and a `Range` header. Each response must be `206 Partial Content` and is streamed to `<name>.section-N.tmp` in the target directory.
-4. Joins the sections, in order, into `<name>.part`, then renames it over the output file once the merge has succeeded (`downloader/storage.go`). A re-run replaces an existing output file, and a failed merge leaves it untouched.
-5. Removes the temp files, whether or not the download succeeded.
+3. Creates a hidden `.<name>.part` file in the target directory and sizes it to the full file (`downloader/storage.go`).
+4. Downloads every range at the same time with a `GET` request and a `Range` header. Each response must be `206 Partial Content` and is written straight into the part file at its own offset.
+5. Renames the part file over the output file once every section has succeeded. A re-run replaces an existing output file. If any section fails, the part file is removed and an existing output file is left untouched.
 
 In batch mode, `DownloadAll` runs up to 4 of these at once. Both the section downloads and the batch downloads use the same limited fan-out helper in `downloader/parallel.go`.
 
@@ -95,7 +95,7 @@ In batch mode, `DownloadAll` runs up to 4 of these at once. Both the section dow
 │   ├── parallel.go          # runParallel: concurrent fan-out with a limit
 │   ├── progress.go          # Progress interface for reporting received bytes
 │   ├── sections.go          # splitting a file into byte ranges
-│   ├── storage.go           # temp files, merging, target path validation
+│   ├── storage.go           # part file, output path, target path validation
 │   ├── parser.go            # getting the file name from a URL
 │   ├── links.go             # reading the links file
 │   └── *_test.go            # unit tests

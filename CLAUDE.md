@@ -21,11 +21,11 @@ A CLI that downloads files by splitting each one into byte ranges fetched in par
 - `downloader/download.go`: `Download.Do()` is the pipeline for one file:
   1. A HEAD request reads `Content-Length`.
   2. `makeSections` splits the file into byte ranges.
-  3. `concurrentDownload` fetches each range with a `Range` GET, which must return 206, and streams it to a temp file.
-  4. `mergeFiles` joins the sections into the output file.
-  5. Temp files are removed by a deferred call, even on failure.
+  3. `createPartFile` creates the hidden `.<resourceName>.part` in the target directory, sized to the whole file.
+  4. `concurrentDownload` fetches each range with a `Range` GET, which must return 206, and writes it into the part file at its offset (`io.NewOffsetWriter`).
+  5. On success the part file is renamed to the output file; on failure a deferred call removes it.
 - `DownloadAll` runs many `Do()` calls through `runParallel` (`downloader/parallel.go`, a semaphore-limited fan-out also used for sections) and joins their errors, so one failure doesn't stop the others.
-- Range planning is in `downloader/sections.go` (`byteRange`, `makeSections`). Temp files, merging and target-path validation are in `downloader/storage.go`.
+- Range planning is in `downloader/sections.go` (`byteRange`, `makeSections`). The part file, output path and target-path validation are in `downloader/storage.go`.
 - Progress messages go to `Download.Out` (nil means stdout). It must be safe for concurrent writes; tests set it to `io.Discard`.
 - `Download.Progress` (`downloader/progress.go`, optional) gets `Start(sectionSizes)` after `makeSections`, `Add(section, n)` concurrently for every received chunk, and `Finish(err)` exactly once when `Do` returns, including when HEAD fails before `Start`. `progress.go` (package main) implements it with mpb bars. Each bar has a custom filler, `renderSegments`, that draws one segment per section; the decorators show statistics for the whole file. It sets `Out` to `io.Discard` while bars are shown, and `main.go` calls `wait()` before printing errors. Bars are disabled by `-progress=false` or when stdout isn't a TTY; colours are disabled by `NO_COLOR`.
 - Requests go through the package-level `httpClient`, which has dial and response-header timeouts but deliberately no overall timeout, so large files aren't cut off.
@@ -33,10 +33,10 @@ A CLI that downloads files by splitting each one into byte ranges fetched in par
 - `downloader/links.go`: `ReadLinks` parses the links file.
 
 ### Non-obvious behavior
-- Temp files are named `<resourceName>.section-N.tmp` in the target directory. The resource name is included so parallel downloads into one directory don't collide.
-- `makeSections` always makes 10 sections and ignores `TotalSections`.
-- The output file is `<resourceName>` in the target directory, with no extension added. `mergeFiles` writes `<resourceName>.part` and renames it over the output only after a successful merge, so a re-run replaces the file.
-- Tests use `httptest` + `http.ServeContent`, which handles HEAD and Range requests. Test payloads must be well over 10 bytes because of the fixed 10 sections.
+- There are no per-section temp files. The only temp file is `.<resourceName>.part` in the target directory, which is hidden on macOS and Linux but not on Windows. It stays next to the output so the final rename is atomic. The resource name is included so parallel downloads into one directory don't collide.
+- `makeSections` uses `TotalSections`, which defaults to 10 when it is 0 or less. Files smaller than that get one section per byte.
+- The output file is `<resourceName>` in the target directory, with no extension added. The part file is renamed over the output only after every section succeeds, so a re-run replaces the file and a failed run leaves it untouched.
+- Tests use `httptest` + `http.ServeContent`, which handles HEAD and Range requests. Test payloads should be well over 10 bytes so that every section has more than one byte.
 
 ## Workflow
 

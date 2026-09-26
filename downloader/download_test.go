@@ -109,12 +109,15 @@ func assertDownloaded(t *testing.T, targetPath, resourceName string, want []byte
 
 func assertNoTempFiles(t *testing.T, targetPath string) {
 	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(targetPath, "*.tmp"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 0 {
-		t.Fatalf("temp files left behind: %v", matches)
+	// "*" also matches hidden ".name.part" files
+	for _, pattern := range []string{"*.part", "*.tmp"} {
+		matches, err := filepath.Glob(filepath.Join(targetPath, pattern))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(matches) != 0 {
+			t.Fatalf("temp files left behind: %v", matches)
+		}
 	}
 }
 
@@ -240,12 +243,18 @@ func TestDownload_SectionErrorMessage(t *testing.T) {
 	t.Cleanup(server.Close)
 	targetPath := t.TempDir()
 
+	if err := os.WriteFile(filepath.Join(targetPath, "file"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	err := newTestDownload(server.URL+"/file", targetPath, "file").Do()
 
 	want := "failed to download section 3: unexpected response code 503 for range request"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got error %v, want %q", err, want)
 	}
+	// a failed download must not touch an existing output file
+	assertDownloaded(t, targetPath, "file", []byte("old"))
 	assertNoTempFiles(t, targetPath)
 }
 

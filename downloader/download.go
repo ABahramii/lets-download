@@ -69,7 +69,7 @@ func NewDownload(rawURL, targetPath string) (*Download, error) {
 
 func (download *Download) Do() (err error) {
 	if download.Progress != nil {
-		// registered first so it runs last and sees errors from removing temp files
+		// registered first so it runs last and sees the final error
 		defer func() { download.Progress.Finish(err) }()
 	}
 
@@ -87,19 +87,27 @@ func (download *Download) Do() (err error) {
 		}
 		download.Progress.Start(sizes)
 	}
-	// remove temp files even when a section or the merge fails
-	defer func() {
-		if removeErr := download.removeTempFiles(sections); err == nil {
-			err = removeErr
-		}
-	}()
-
-	err = download.concurrentDownload(sections)
+	partPath := partFilePath(download.TargetPath, download.ResourceName)
+	file, err := createPartFile(partPath, int64(totalSize))
 	if err != nil {
 		return err
 	}
+	// on failure remove the part file; an existing output file is left untouched
+	defer func() {
+		if err != nil {
+			file.Close()
+			os.Remove(partPath)
+		}
+	}()
 
-	return mergeFiles(download.TargetPath, download.ResourceName, sections)
+	err = download.concurrentDownload(file, sections)
+	if err != nil {
+		return err
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(partPath, outputFilePath(download.TargetPath, download.ResourceName))
 }
 
 // ErrDuplicateOutput is returned by DownloadAll for a download whose output file
@@ -176,9 +184,10 @@ func (download *Download) getNewRequest(method string) (*http.Request, error) {
 	return request, nil
 }
 
-func (download *Download) concurrentDownload(sections []byteRange) error {
+// concurrentDownload writes each section into dst at the section's offset.
+func (download *Download) concurrentDownload(dst io.WriterAt, sections []byteRange) error {
 	errs := runParallel(len(sections), 0, func(i int) error {
-		if err := download.downloadSection(i, sections[i]); err != nil {
+		if err := download.downloadSection(dst, i, sections[i]); err != nil {
 			return fmt.Errorf("failed to download section %d: %w", i, err)
 		}
 		return nil
@@ -189,7 +198,7 @@ func (download *Download) concurrentDownload(sections []byteRange) error {
 	return nil
 }
 
-func (download *Download) downloadSection(index int, section byteRange) error {
+func (download *Download) downloadSection(dst io.WriterAt, index int, section byteRange) error {
 	ctx, watchdog := withIdleTimeout(context.Background(), sectionIdleTimeout)
 	defer watchdog.stop()
 
@@ -220,14 +229,9 @@ func (download *Download) downloadSection(index int, section byteRange) error {
 		}
 	}
 
-	file, err := os.Create(sectionFilePath(download.TargetPath, download.ResourceName, index))
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
+	w := io.NewOffsetWriter(dst, int64(section.start))
 	// read at most one byte more than expected, enough to detect a body that is too long
-	n, err := io.Copy(file, io.LimitReader(progressReader(watchdog.reader(response.Body), download.Progress, index), int64(section.length())+1))
+	n, err := io.Copy(w, io.LimitReader(progressReader(watchdog.reader(response.Body), download.Progress, index), int64(section.length())+1))
 	if err != nil {
 		return watchdog.err(err)
 	}
@@ -237,6 +241,5 @@ func (download *Download) downloadSection(index int, section byteRange) error {
 		return fmt.Errorf("received %d bytes for range %d-%d, want %d", n, section.start, section.end, want)
 	}
 	fmt.Fprintf(download.out(), "downloaded %d bytes from section %d: [%d %d]\n", n, index, section.start, section.end)
-
-	return file.Close()
+	return nil
 }

@@ -2,8 +2,6 @@ package downloader
 
 import (
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -19,63 +17,29 @@ func ValidateTargetPath(path string) error {
 	return nil
 }
 
-// sectionFilePath includes the resource name so concurrent downloads
-// into the same directory don't overwrite each other's temp files.
-func sectionFilePath(targetPath, resourceName string, i int) string {
-	return filepath.Join(targetPath, fmt.Sprintf("%s.section-%d.tmp", resourceName, i))
+// partFilePath is where a download is written while in progress: a hidden
+// file next to the output, so the final rename stays on one filesystem.
+// The resource name is included so concurrent downloads into the same
+// directory don't overwrite each other's part files.
+func partFilePath(targetPath, resourceName string) string {
+	return filepath.Join(targetPath, "."+resourceName+".part")
 }
 
 func outputFilePath(targetPath, resourceName string) string {
 	return filepath.Join(targetPath, resourceName)
 }
 
-// mergeFiles joins the sections into a ".part" file and renames it over the
-// output file only when the merge succeeded. A re-run replaces an existing
-// output file instead of appending to it, and a failed merge leaves any
-// existing output file untouched.
-func mergeFiles(targetPath, resourceName string, sections []byteRange) (err error) {
-	filePath := outputFilePath(targetPath, resourceName)
-	partPath := filePath + ".part"
-	file, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
+// createPartFile creates (or truncates a stale) part file and extends it to
+// size bytes, so every section can write at its own offset.
+func createPartFile(path string, size int64) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() {
-		if err != nil {
-			file.Close()
-			os.Remove(partPath)
-		}
-	}()
-
-	for i := range sections {
-		if err := appendFile(file, sectionFilePath(targetPath, resourceName, i)); err != nil {
-			return err
-		}
+	if err := file.Truncate(size); err != nil {
+		file.Close()
+		os.Remove(path)
+		return nil, err
 	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	return os.Rename(partPath, filePath)
-}
-
-// appendFile streams the file at path into dst without loading it into memory.
-func appendFile(dst io.Writer, path string) error {
-	src, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	_, err = io.Copy(dst, src)
-	return err
-}
-
-func (download *Download) removeTempFiles(sections []byteRange) error {
-	for i := range sections {
-		err := os.Remove(sectionFilePath(download.TargetPath, download.ResourceName, i))
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
+	return file, nil
 }
