@@ -26,7 +26,7 @@ func sectionFilePath(targetPath, resourceName string, i int) string {
 }
 
 func outputFilePath(targetPath, resourceName string) string {
-	return filepath.Join(targetPath, resourceName+".mp4")
+	return filepath.Join(targetPath, resourceName)
 }
 
 // mergeFiles joins the sections into a ".part" file and renames it over the

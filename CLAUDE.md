@@ -35,8 +35,8 @@ A CLI that downloads files by splitting each one into byte ranges fetched in par
 ### Non-obvious behavior
 - Temp files are named `<resourceName>.section-N.tmp` in the target directory. The resource name is included so parallel downloads into one directory don't collide.
 - `makeSections` always makes 10 sections and ignores `TotalSections`.
-- `mergeFiles` always appends `.mp4` to the output name and opens the file with `O_APPEND` without truncating, so re-running a download appends to an existing file.
-- Tests use `httptest` + `http.ServeContent`, which handles HEAD and Range requests. Test payloads must be well over 10 bytes because of the fixed 10 sections. Expected output files are `<name>.mp4`.
+- The output file is `<resourceName>` in the target directory, with no extension added. `mergeFiles` writes `<resourceName>.part` and renames it over the output only after a successful merge, so a re-run replaces the file.
+- Tests use `httptest` + `http.ServeContent`, which handles HEAD and Range requests. Test payloads must be well over 10 bytes because of the fixed 10 sections.
 
 ## Workflow
 

@@ -25,7 +25,7 @@ func TestMergeFiles(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, "video.mp4"))
+	got, err := os.ReadFile(filepath.Join(dir, "video"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestMergeFiles(t *testing.T) {
 // a re-run must replace the output file, not append to it
 func TestMergeFiles_ReplacesExistingFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "video.mp4"), []byte("old"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "video"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	sections := writeSections(t, dir, "video", []string{"new"})
@@ -47,7 +47,7 @@ func TestMergeFiles_ReplacesExistingFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, "video.mp4"))
+	got, err := os.ReadFile(filepath.Join(dir, "video"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestMergeFiles_ReplacesExistingFile(t *testing.T) {
 
 func TestMergeFiles_FailureKeepsExistingFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "video.mp4"), []byte("old"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "video"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// section 0 exists, section 1 is missing, so the merge fails partway
@@ -69,7 +69,7 @@ func TestMergeFiles_FailureKeepsExistingFile(t *testing.T) {
 		t.Fatal("expected error for missing section file")
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, "video.mp4"))
+	got, err := os.ReadFile(filepath.Join(dir, "video"))
 	if err != nil {
 		t.Fatal(err)
 	}

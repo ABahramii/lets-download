@@ -70,7 +70,7 @@ The file name is taken from the URL:
 1. If the URL has a `filename` query parameter, its value is used (`...?filename=lecture-2` gives `lecture-2`).
 2. Otherwise, the last part of the URL path is used (`.../files/intro` gives `intro`).
 
-The output is saved as `<name>.mp4` in the target directory. See [Known limitations](#known-limitations).
+The output is saved as `<name>` in the target directory.
 
 ## How it works
 
@@ -79,7 +79,7 @@ For each file, `Download.Do()` in `downloader/download.go`:
 1. Sends a `HEAD` request and reads `Content-Length` to get the file size.
 2. Splits the file into 10 byte ranges (`downloader/sections.go`).
 3. Downloads every range at the same time with a `GET` request and a `Range` header. Each response must be `206 Partial Content` and is streamed to `<name>.section-N.tmp` in the target directory.
-4. Joins the sections, in order, into `<name>.mp4.part`, then renames it over the output file once the merge has succeeded (`downloader/storage.go`). A re-run replaces an existing output file, and a failed merge leaves it untouched.
+4. Joins the sections, in order, into `<name>.part`, then renames it over the output file once the merge has succeeded (`downloader/storage.go`). A re-run replaces an existing output file, and a failed merge leaves it untouched.
 5. Removes the temp files, whether or not the download succeeded.
 
 In batch mode, `DownloadAll` runs up to 4 of these at once. Both the section downloads and the batch downloads use the same limited fan-out helper in `downloader/parallel.go`.
@@ -142,4 +142,3 @@ Port 80 must be free, and no other container may be named `nginx`.
 - Servers that don't support range requests, or that don't send `Content-Length`, are not supported.
 - There is no resume support. An interrupted download has to start over.
 - In single-URL mode, a failed download ends with a panic instead of a clean error message.
-- Output files always get a `.mp4` extension, whatever the real file type is.

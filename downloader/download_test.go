@@ -98,7 +98,7 @@ func TestDownload_WritesProgressToOut(t *testing.T) {
 
 func assertDownloaded(t *testing.T, targetPath, resourceName string, want []byte) {
 	t.Helper()
-	got, err := os.ReadFile(filepath.Join(targetPath, resourceName+".mp4"))
+	got, err := os.ReadFile(filepath.Join(targetPath, resourceName))
 	if err != nil {
 		t.Fatalf("reading %s: %v", resourceName, err)
 	}
@@ -485,7 +485,7 @@ func TestDownload_WrongSectionResponse(t *testing.T) {
 				t.Fatalf("got error %v, want %q", err, want)
 			}
 			assertNoTempFiles(t, targetPath)
-			if _, statErr := os.Stat(filepath.Join(targetPath, "file.mp4")); !os.IsNotExist(statErr) {
+			if _, statErr := os.Stat(filepath.Join(targetPath, "file")); !os.IsNotExist(statErr) {
 				t.Fatalf("output file must not be created, stat error: %v", statErr)
 			}
 		})
