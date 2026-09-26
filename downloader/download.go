@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -198,17 +199,26 @@ func (download *Download) getNewRequest(ctx context.Context, method string) (*ht
 }
 
 // concurrentDownload writes each section into dst at the section's offset.
+// The first failing section cancels the others, since the download has failed
+// anyway, and its error is the one returned.
 func (download *Download) concurrentDownload(ctx context.Context, dst io.WriterAt, sections []byteRange) error {
-	errs := runParallel(len(sections), 0, func(i int) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// recorded explicitly: the sections cancelled because of it may finish
+	// before the failing one returns, and their errors don't say what went wrong
+	var firstErr error
+	var once sync.Once
+	runParallel(len(sections), 0, func(i int) error {
 		if err := download.downloadSection(ctx, dst, i, sections[i]); err != nil {
-			return fmt.Errorf("failed to download section %d: %w", i, err)
+			once.Do(func() {
+				firstErr = fmt.Errorf("failed to download section %d: %w", i, err)
+				cancel()
+			})
 		}
 		return nil
 	})
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return firstErr
 }
 
 func (download *Download) downloadSection(ctx context.Context, dst io.WriterAt, index int, section byteRange) error {

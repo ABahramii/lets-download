@@ -80,7 +80,7 @@ For each file, `Download.Do()` in `downloader/download.go`:
 2. Splits the file into 10 byte ranges (`downloader/sections.go`).
 3. Creates a hidden `.<name>.part` file in the target directory and sizes it to the full file (`downloader/storage.go`).
 4. Downloads every range at the same time with a `GET` request and a `Range` header. Each response must be `206 Partial Content` and is written straight into the part file at its own offset.
-5. Renames the part file over the output file once every section has succeeded. A re-run replaces an existing output file. If any section fails, the part file is removed and an existing output file is left untouched.
+5. Renames the part file over the output file once every section has succeeded. A re-run replaces an existing output file. If any section fails, the other sections are stopped, the part file is removed and an existing output file is left untouched.
 
 In batch mode, `DownloadAll` runs up to 4 of these at once. Both the section downloads and the batch downloads use the same limited fan-out helper in `downloader/parallel.go`.
 

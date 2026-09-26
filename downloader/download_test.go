@@ -638,6 +638,41 @@ func TestDownload_CancelRemovesPartFile(t *testing.T) {
 	assertNoTempFiles(t, targetPath)
 }
 
+// one failing section must stop the others instead of waiting for them to finish
+func TestDownload_SectionFailureCancelsOthers(t *testing.T) {
+	const size = 10_000
+	release := make(chan struct{})
+	// section 3 fails; the others send one byte and then stall until the test ends
+	server := newRangeServer(t, size, func(w http.ResponseWriter, section byteRange) {
+		if section.start == 3_000 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", section.start, section.end, size))
+		w.Header().Set("Content-Length", strconv.Itoa(section.length()))
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write([]byte{0})
+		w.(http.Flusher).Flush()
+		<-release
+	})
+	t.Cleanup(func() { close(release) }) // runs before server.Close, which waits for handlers
+	targetPath := t.TempDir()
+
+	done := make(chan error, 1)
+	go func() { done <- newTestDownload(server.URL+"/file", targetPath, "file").Do() }()
+
+	select {
+	case err := <-done:
+		want := "failed to download section 3: unexpected response code 503 for range request"
+		if err == nil || err.Error() != want {
+			t.Fatalf("got error %v, want %q", err, want)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("download kept waiting for the other sections after one failed")
+	}
+	assertNoTempFiles(t, targetPath)
+}
+
 func TestDownloadAllContext_Cancelled(t *testing.T) {
 	server := newFileServer(t, map[string][]byte{"file1": randomBytes(t, 1_000), "file2": randomBytes(t, 1_000)})
 	targetPath := t.TempDir()
