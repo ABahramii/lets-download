@@ -13,6 +13,7 @@ var (
 	urlFlag        = flag.String("url", "http://127.0.0.1:80/test_file", "URL for download file")
 	targetPathFlag = flag.String("targetPath", currentDir, "path for downloaded file")
 	linksFileFlag  = flag.String("f", "", "path of a file containing one download link per line (overrides -url)")
+	progressFlag   = flag.Bool("progress", true, "show progress bars (only when stdout is a terminal)")
 )
 
 const maxParallelDownloads = 4
@@ -43,7 +44,10 @@ func downloadSingle(url, targetPath string) {
 		os.Exit(0)
 	}
 
+	bars := newProgressBars()
+	bars.track(download)
 	err = download.Do()
+	bars.wait()
 	if err != nil {
 		fmt.Println("An error occurred while downloading.")
 		// Todo: remove panic
@@ -79,7 +83,12 @@ func downloadFromFile(filePath, targetPath string) {
 		os.Exit(1)
 	}
 
+	bars := newProgressBars()
+	for _, download := range downloads {
+		bars.track(download)
+	}
 	err = downloader.DownloadAll(downloads, maxParallelDownloads)
+	bars.wait()
 	if err != nil {
 		fmt.Println("Some downloads failed:")
 		fmt.Println(err.Error())

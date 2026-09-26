@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GO_PROGRAM_PATH="../main.go"
+GO_PROGRAM_PATH=".."
 
 # create test file for download
 mkdir /tmp/nginx

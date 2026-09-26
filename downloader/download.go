@@ -37,6 +37,8 @@ type Download struct {
 	// Out receives progress messages; nil means os.Stdout.
 	// Sections write to it concurrently, so it must be safe for concurrent use.
 	Out io.Writer
+	// Progress, if set, is told the size of each section and every received byte.
+	Progress Progress
 }
 
 func (download *Download) out() io.Writer {
@@ -66,6 +68,11 @@ func NewDownload(rawURL, targetPath string) (*Download, error) {
 }
 
 func (download *Download) Do() (err error) {
+	if download.Progress != nil {
+		// registered first so it runs last and sees errors from removing temp files
+		defer func() { download.Progress.Finish(err) }()
+	}
+
 	fmt.Fprintln(download.out(), "making connection")
 	totalSize, err := download.getResourceSize()
 	if err != nil {
@@ -73,6 +80,13 @@ func (download *Download) Do() (err error) {
 	}
 
 	sections := makeSections(download.TotalSections, totalSize)
+	if download.Progress != nil {
+		sizes := make([]int64, len(sections))
+		for i, section := range sections {
+			sizes[i] = int64(section.length())
+		}
+		download.Progress.Start(sizes)
+	}
 	// remove temp files even when a section or the merge fails
 	defer func() {
 		if removeErr := download.removeTempFiles(sections); err == nil {
@@ -213,7 +227,7 @@ func (download *Download) downloadSection(index int, section byteRange) error {
 	defer file.Close()
 
 	// read at most one byte more than expected, enough to detect a body that is too long
-	n, err := io.Copy(file, io.LimitReader(watchdog.reader(response.Body), int64(section.length())+1))
+	n, err := io.Copy(file, io.LimitReader(progressReader(watchdog.reader(response.Body), download.Progress, index), int64(section.length())+1))
 	if err != nil {
 		return watchdog.err(err)
 	}

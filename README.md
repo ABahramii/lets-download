@@ -2,7 +2,7 @@
 
 Let's Download is a command-line tool, written in Go, that speeds up file downloads by splitting each file into byte ranges and fetching them in parallel. It can download a single URL, or a list of URLs from a file with several downloads running at once.
 
-It uses only the Go standard library.
+Its only dependency is [mpb](https://github.com/vbauerster/mpb), which draws the progress bars.
 
 ## Features
 
@@ -10,6 +10,7 @@ It uses only the Go standard library.
 - **Batch mode.** Download every link in a text file, with at most 4 files downloading at the same time.
 - **Isolated failures.** In batch mode, one failed download doesn't stop the others. All errors are reported together at the end.
 - **Safe temp files.** Sections are written to temporary files that are always removed, even when a download fails. Their names include the file name, so parallel downloads into the same directory don't collide.
+- **Progress bars.** Each file gets a coloured live bar with size, percentage, speed and ETA. The bar is split into one segment per section, so you can see each section fill at its own pace. Set `NO_COLOR` to turn colours off. Bars are shown only when stdout is a terminal. Otherwise, or with `-progress=false`, text messages are printed instead.
 - **Timeouts that don't cut off large files.** Connecting and waiting for response headers time out, but there is no limit on the total download time.
 
 ## Requirements
@@ -23,13 +24,13 @@ It uses only the Go standard library.
 Download a single file:
 
 ```sh
-go run main.go -url=http://127.0.0.1:80/test_file -targetPath=./
+go run . -url=http://127.0.0.1:80/test_file -targetPath=./
 ```
 
 Download several files listed in a text file:
 
 ```sh
-go run main.go -f=links.txt -targetPath=./
+go run . -f=links.txt -targetPath=./
 ```
 
 You can also build a binary:
@@ -46,6 +47,7 @@ go build -o lets-download .
 | `-url` | `http://127.0.0.1:80/test_file` | URL of the file to download. Must be `http` or `https`. |
 | `-targetPath` | current directory | Directory to save files in. It must already exist. |
 | `-f` | *(empty)* | Path of a links file. When set, it overrides `-url`. |
+| `-progress` | `true` | Show progress bars. Ignored when stdout is not a terminal. |
 
 ## Links file format
 
@@ -87,9 +89,11 @@ In batch mode, `DownloadAll` runs up to 4 of these at once. Both the section dow
 ```text
 .
 ├── main.go                  # CLI: flags, single and batch mode
+├── progress.go              # mpb progress bars with per-section segments
 ├── downloader/
 │   ├── download.go          # Download type, HTTP client, Do() and DownloadAll()
 │   ├── parallel.go          # runParallel: concurrent fan-out with a limit
+│   ├── progress.go          # Progress interface for reporting received bytes
 │   ├── sections.go          # splitting a file into byte ranges
 │   ├── storage.go           # temp files, merging, target path validation
 │   ├── parser.go            # getting the file name from a URL
@@ -123,7 +127,7 @@ gofmt -l . && go vet ./...
 
 ### End-to-end test with nginx
 
-`bin/lets-download.sh` creates a 500 MB file of zeros, serves it from an nginx Docker container on port 80, runs the downloader against it, and then cleans up. It runs `../main.go`, so start it from `bin/`:
+`bin/lets-download.sh` creates a 500 MB file of zeros, serves it from an nginx Docker container on port 80, runs the downloader against it, and then cleans up. It runs the package in `..`, so start it from `bin/`:
 
 ```sh
 cd bin
@@ -135,7 +139,7 @@ Port 80 must be free, and no other container may be named `nginx`.
 
 ## Known limitations
 
-- Output files always get a `.mp4` extension, whatever the real file type is.
 - Servers that don't support range requests, or that don't send `Content-Length`, are not supported.
 - There is no resume support. An interrupted download has to start over.
 - In single-URL mode, a failed download ends with a panic instead of a clean error message.
+- Output files always get a `.mp4` extension, whatever the real file type is.

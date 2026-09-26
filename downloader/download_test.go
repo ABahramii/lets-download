@@ -491,3 +491,96 @@ func TestDownload_WrongSectionResponse(t *testing.T) {
 		})
 	}
 }
+
+// fakeProgress records what a Download reports to its Progress.
+type fakeProgress struct {
+	mu       sync.Mutex
+	sizes    []int64
+	added    []int64 // bytes per section
+	starts   int
+	finishes int
+	err      error
+}
+
+func (p *fakeProgress) Start(sectionSizes []int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.sizes = sectionSizes
+	p.added = make([]int64, len(sectionSizes))
+	p.starts++
+}
+
+func (p *fakeProgress) Add(section, n int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.added[section] += int64(n)
+}
+
+func (p *fakeProgress) Finish(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.err = err
+	p.finishes++
+}
+
+func TestDownload_ReportsProgress(t *testing.T) {
+	content := randomBytes(t, 5_000)
+	server := newFileServer(t, map[string][]byte{"file": content})
+	progress := &fakeProgress{}
+	d := newTestDownload(server.URL+"/file", t.TempDir(), "file")
+	d.Progress = progress
+
+	if err := d.Do(); err != nil {
+		t.Fatal(err)
+	}
+	if progress.starts != 1 || len(progress.sizes) != d.TotalSections {
+		t.Fatalf("Start called %d times with %d sections, want once with %d", progress.starts, len(progress.sizes), d.TotalSections)
+	}
+	var total int64
+	for i, size := range progress.sizes {
+		total += size
+		if progress.added[i] != size {
+			t.Errorf("section %d: Add reported %d bytes, want %d", i, progress.added[i], size)
+		}
+	}
+	if total != int64(len(content)) {
+		t.Fatalf("section sizes add up to %d, want %d", total, len(content))
+	}
+	if progress.finishes != 1 || progress.err != nil {
+		t.Fatalf("Finish called %d times with %v, want once with nil", progress.finishes, progress.err)
+	}
+}
+
+func TestDownload_ReportsProgressError(t *testing.T) {
+	// ignores Range and always sends the full body with 200
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "5000")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	progress := &fakeProgress{}
+	d := newTestDownload(server.URL+"/file", t.TempDir(), "file")
+	d.Progress = progress
+
+	err := d.Do()
+	if err == nil {
+		t.Fatal("expected error when server ignores Range")
+	}
+	if progress.finishes != 1 || progress.err != err {
+		t.Fatalf("Finish called %d times with %v, want once with %v", progress.finishes, progress.err, err)
+	}
+}
+
+func TestDownload_ReportsProgressErrorBeforeStart(t *testing.T) {
+	server := newFileServer(t, nil)
+	progress := &fakeProgress{}
+	d := newTestDownload(server.URL+"/missing", t.TempDir(), "missing")
+	d.Progress = progress
+
+	if err := d.Do(); err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if progress.starts != 0 || progress.finishes != 1 || progress.err == nil {
+		t.Fatalf("got %d starts and %d finishes with %v, want 0 starts and 1 finish with an error", progress.starts, progress.finishes, progress.err)
+	}
+}
