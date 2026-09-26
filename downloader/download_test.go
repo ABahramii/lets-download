@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -592,4 +593,63 @@ func TestDownload_ReportsProgressErrorBeforeStart(t *testing.T) {
 	if progress.starts != 0 || progress.finishes != 1 || progress.err == nil {
 		t.Fatalf("got %d starts and %d finishes with %v, want 0 starts and 1 finish with an error", progress.starts, progress.finishes, progress.err)
 	}
+}
+
+// cancelling the context mid-download must remove the part file and leave an
+// existing output file untouched
+func TestDownload_CancelRemovesPartFile(t *testing.T) {
+	const size = 10_000
+	started := make(chan struct{}, 10)
+	release := make(chan struct{})
+	// sends the first byte of each section, then stalls until the test ends
+	server := newRangeServer(t, size, func(w http.ResponseWriter, section byteRange) {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", section.start, section.end, size))
+		w.Header().Set("Content-Length", strconv.Itoa(section.length()))
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write([]byte{0})
+		w.(http.Flusher).Flush()
+		started <- struct{}{}
+		<-release
+	})
+	t.Cleanup(func() { close(release) }) // runs before server.Close, which waits for handlers
+	targetPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(targetPath, "file"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- newTestDownload(server.URL+"/file", targetPath, "file").DoContext(ctx) }()
+	<-started
+	if _, err := os.Stat(partFilePath(targetPath, "file")); err != nil {
+		t.Fatalf("part file should exist while downloading: %v", err)
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got error %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("download did not stop after cancel")
+	}
+	assertDownloaded(t, targetPath, "file", []byte("old"))
+	assertNoTempFiles(t, targetPath)
+}
+
+func TestDownloadAllContext_Cancelled(t *testing.T) {
+	server := newFileServer(t, map[string][]byte{"file1": randomBytes(t, 1_000), "file2": randomBytes(t, 1_000)})
+	targetPath := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := DownloadAllContext(ctx, []*Download{
+		newTestDownload(server.URL+"/file1", targetPath, "file1"),
+		newTestDownload(server.URL+"/file2", targetPath, "file2"),
+	}, 0)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got error %v, want context.Canceled", err)
+	}
+	assertNoTempFiles(t, targetPath)
 }

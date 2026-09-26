@@ -24,6 +24,7 @@ A CLI that downloads files by splitting each one into byte ranges fetched in par
   3. `createPartFile` creates the hidden `.<resourceName>.part` in the target directory, sized to the whole file.
   4. `concurrentDownload` fetches each range with a `Range` GET, which must return 206, and writes it into the part file at its offset (`io.NewOffsetWriter`).
   5. On success the part file is renamed to the output file; on failure a deferred call removes it.
+- `DoContext` / `DownloadAllContext` take a context that cancels every request; `Do` / `DownloadAll` wrap them with `context.Background()`. `main.go` cancels it on SIGINT/SIGTERM via `signal.NotifyContext` so part files are cleaned up, then exits 130. Download errors exit 1.
 - `DownloadAll` runs many `Do()` calls through `runParallel` (`downloader/parallel.go`, a semaphore-limited fan-out also used for sections) and joins their errors, so one failure doesn't stop the others.
 - Range planning is in `downloader/sections.go` (`byteRange`, `makeSections`). The part file, output path and target-path validation are in `downloader/storage.go`.
 - Progress messages go to `Download.Out` (nil means stdout). It must be safe for concurrent writes; tests set it to `io.Discard`.

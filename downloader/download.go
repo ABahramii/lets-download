@@ -67,14 +67,21 @@ func NewDownload(rawURL, targetPath string) (*Download, error) {
 	}, nil
 }
 
-func (download *Download) Do() (err error) {
+// Do downloads the file; it is DoContext with a background context.
+func (download *Download) Do() error {
+	return download.DoContext(context.Background())
+}
+
+// DoContext downloads the file. Cancelling ctx aborts every request, and the
+// part file is removed as with any other failure.
+func (download *Download) DoContext(ctx context.Context) (err error) {
 	if download.Progress != nil {
 		// registered first so it runs last and sees the final error
 		defer func() { download.Progress.Finish(err) }()
 	}
 
 	fmt.Fprintln(download.out(), "making connection")
-	totalSize, err := download.getResourceSize()
+	totalSize, err := download.getResourceSize(ctx)
 	if err != nil {
 		return err
 	}
@@ -100,7 +107,7 @@ func (download *Download) Do() (err error) {
 		}
 	}()
 
-	err = download.concurrentDownload(file, sections)
+	err = download.concurrentDownload(ctx, file, sections)
 	if err != nil {
 		return err
 	}
@@ -114,15 +121,20 @@ func (download *Download) Do() (err error) {
 // is already used by an earlier download in the same batch.
 var ErrDuplicateOutput = errors.New("duplicate resource name")
 
-// DownloadAll downloads all given resources concurrently, at most maxParallel
-// at a time (maxParallel <= 0 means no limit).
+// DownloadAll is DownloadAllContext with a background context.
+func DownloadAll(downloads []*Download, maxParallel int) error {
+	return DownloadAllContext(context.Background(), downloads, maxParallel)
+}
+
+// DownloadAllContext downloads all given resources concurrently, at most maxParallel
+// at a time (maxParallel <= 0 means no limit). Cancelling ctx aborts them all.
 // Downloads that would write to the same output file as an earlier one in the
 // list are not started and are reported as errors.
 // A failed download does not stop the others; all failures are returned joined.
-func DownloadAll(downloads []*Download, maxParallel int) error {
+func DownloadAllContext(ctx context.Context, downloads []*Download, maxParallel int) error {
 	unique, errs := rejectDuplicateOutputs(downloads)
 	runErrs := runParallel(len(unique), maxParallel, func(i int) error {
-		if err := unique[i].Do(); err != nil {
+		if err := unique[i].DoContext(ctx); err != nil {
 			return fmt.Errorf("%s: %w", unique[i].URL, err)
 		}
 		return nil
@@ -150,8 +162,8 @@ func rejectDuplicateOutputs(downloads []*Download) (unique []*Download, errs []e
 	return unique, errs
 }
 
-func (download *Download) getResourceSize() (int, error) {
-	request, err := download.getNewRequest(http.MethodHead)
+func (download *Download) getResourceSize(ctx context.Context) (int, error) {
+	request, err := download.getNewRequest(ctx, http.MethodHead)
 	if err != nil {
 		return 0, err
 	}
@@ -171,8 +183,9 @@ func (download *Download) getResourceSize() (int, error) {
 	return strconv.Atoi(totalSize)
 }
 
-func (download *Download) getNewRequest(method string) (*http.Request, error) {
-	request, err := http.NewRequest(
+func (download *Download) getNewRequest(ctx context.Context, method string) (*http.Request, error) {
+	request, err := http.NewRequestWithContext(
+		ctx,
 		method,
 		download.URL,
 		nil,
@@ -185,9 +198,9 @@ func (download *Download) getNewRequest(method string) (*http.Request, error) {
 }
 
 // concurrentDownload writes each section into dst at the section's offset.
-func (download *Download) concurrentDownload(dst io.WriterAt, sections []byteRange) error {
+func (download *Download) concurrentDownload(ctx context.Context, dst io.WriterAt, sections []byteRange) error {
 	errs := runParallel(len(sections), 0, func(i int) error {
-		if err := download.downloadSection(dst, i, sections[i]); err != nil {
+		if err := download.downloadSection(ctx, dst, i, sections[i]); err != nil {
 			return fmt.Errorf("failed to download section %d: %w", i, err)
 		}
 		return nil
@@ -198,15 +211,14 @@ func (download *Download) concurrentDownload(dst io.WriterAt, sections []byteRan
 	return nil
 }
 
-func (download *Download) downloadSection(dst io.WriterAt, index int, section byteRange) error {
-	ctx, watchdog := withIdleTimeout(context.Background(), sectionIdleTimeout)
+func (download *Download) downloadSection(ctx context.Context, dst io.WriterAt, index int, section byteRange) error {
+	ctx, watchdog := withIdleTimeout(ctx, sectionIdleTimeout)
 	defer watchdog.stop()
 
-	request, err := download.getNewRequest(http.MethodGet)
+	request, err := download.getNewRequest(ctx, http.MethodGet)
 	if err != nil {
 		return err
 	}
-	request = request.WithContext(ctx)
 	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", section.start, section.end))
 	response, err := httpClient.Do(request)
 	if err != nil {
